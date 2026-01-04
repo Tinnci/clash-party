@@ -31,7 +31,7 @@ import {
   getAxios
 } from './mihomoApi'
 import chokidar from 'chokidar'
-import { readFile, rm, writeFile } from 'fs/promises'
+import { readFile, rm, writeFile, readdir } from 'fs/promises'
 import { promisify } from 'util'
 import { mainWindow } from '../window'
 import path from 'path'
@@ -388,6 +388,26 @@ async function cleanupUnixSockets(): Promise<void> {
       } catch (error) {
         await managerLogger.warn(`Failed to cleanup socket file ${socketPath}:`, error)
       }
+    }
+
+    // 清理进程编号后缀的遗留 Socket
+    try {
+      const uid = process.getuid?.() || 'user'
+      const entries = await readdir('/tmp')
+      const pattern = new RegExp(`^mihomo-party-${uid}-\\d+\\.sock$`)
+      for (const entry of entries) {
+        if (pattern.test(entry)) {
+          const socketPath = path.join('/tmp', entry)
+          try {
+            await rm(socketPath)
+            await managerLogger.info(`Cleaned up socket file: ${socketPath}`)
+          } catch (error) {
+            await managerLogger.warn(`Failed to cleanup socket file ${socketPath}:`, error)
+          }
+        }
+      }
+    } catch (error) {
+      await managerLogger.warn('Failed to scan /tmp for mihomo sockets:', error)
     }
   } catch (error) {
     await managerLogger.error('Unix socket cleanup failed:', error)

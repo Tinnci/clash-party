@@ -1,7 +1,7 @@
 pkgname=mihomo-party-electron
 _pkgname=mihomo-party
 pkgver=0.1.3
-pkgrel=1
+pkgrel=2
 pkgdesc="Another Mihomo GUI."
 arch=('x86_64' 'aarch64')
 url="https://github.com/mihomo-party-org/mihomo-party"
@@ -9,7 +9,7 @@ license=('GPL3')
 conflicts=("$_pkgname" "$_pkgname-git" "$_pkgname-bin" "$_pkgname-electron-bin")
 depends=('electron' 'gtk3' 'libnotify' 'nss' 'libxss' 'libxtst' 'xdg-utils' 'at-spi2-core' 'util-linux-libs' 'libsecret')
 optdepends=('libappindicator-gtk3: Allow mihomo-party to extend a menu via Ayatana indicators in Unity, KDE or Systray (GTK+ 3 library).')
-makedepends=('nodejs' 'pnpm' 'libxcrypt-compat' 'asar')
+makedepends=('nodejs' 'bun' 'libxcrypt-compat' 'asar')
 install=$_pkgname.install
 source=(
     "${_pkgname}-${pkgver}.tar.gz::${url}/archive/refs/tags/v${pkgver}.tar.gz"
@@ -25,12 +25,12 @@ options=('!lto')
 prepare(){
     cd $srcdir/clash-party-${pkgver}
     sed -i "s/productName: Clash Party/productName: clash-party/" electron-builder.yml
-    pnpm install
+    bun install --frozen-lockfile
 }
 
 build(){
     cd $srcdir/${_pkgname}-${pkgver}
-    pnpm build:linux deb
+    bun run build:linux -- deb
 }
 
 package() {

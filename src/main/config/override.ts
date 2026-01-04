@@ -8,12 +8,24 @@ import { parse, stringify } from '../utils/yaml'
 let overrideConfig: IOverrideConfig // override.yaml
 let overrideConfigWriteQueue: Promise<void> = Promise.resolve()
 
+function normalizeOverrideConfig(data: unknown): IOverrideConfig {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    return { items: [] }
+  }
+
+  const config = data as Partial<IOverrideConfig>
+  return {
+    ...(config || {}),
+    items: Array.isArray(config?.items) ? config!.items : []
+  }
+}
+
 export async function getOverrideConfig(force = false): Promise<IOverrideConfig> {
   if (force || !overrideConfig) {
     const data = await readFile(overrideConfigPath(), 'utf-8')
-    overrideConfig = parse(data) || { items: [] }
+    overrideConfig = normalizeOverrideConfig(parse(data))
   }
-  if (typeof overrideConfig !== 'object') overrideConfig = { items: [] }
+  overrideConfig = normalizeOverrideConfig(overrideConfig)
   return overrideConfig
 }
 

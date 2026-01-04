@@ -1,0 +1,11 @@
+# Bun configuration - replaces .npmrc functionality where applicable
+# Note: shamefully-hoist and virtual-store-dir are pnpm-specific
+# Bun uses a flat node_modules structure by default
+
+# These settings are handled differently in bun:
+# - shamefully-hoist=true -> Bun always hoists
+# - virtual-store-dir-max-length -> Not applicable in bun
+# - public-hoist-pattern -> Bun hoists everything
+# - only-built-dependencies -> Not directly supported, but bun builds only what's needed
+
+# For electron/esbuild/meta-json-schema, bun will handle builds automatically

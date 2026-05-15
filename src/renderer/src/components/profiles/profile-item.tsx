@@ -17,10 +17,11 @@ import dayjs from '@renderer/utils/dayjs'
 import React, { Key, useMemo, useState } from 'react'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { openFile } from '@renderer/utils/ipc'
+import { openFile, restartCore } from '@renderer/utils/ipc'
 import { useAppConfig } from '@renderer/hooks/use-app-config'
 import { useTranslation } from 'react-i18next'
 import BaseConfirmModal from '../base/base-confirm-modal'
+import SmartPolicyEditorModal from '../smart-policy-editor-modal'
 import EditRulesModal from './edit-rules-modal'
 import EditInfoModal from './edit-info-modal'
 import EditFileModal from './edit-file-modal'
@@ -65,6 +66,7 @@ const ProfileItem: React.FC<Props> = (props) => {
   const [openRulesEditor, setOpenRulesEditor] = useState(false)
   const [openQrCode, setOpenQrCode] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [openSmartPolicyEditor, setOpenSmartPolicyEditor] = useState(false)
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const {
     attributes,
@@ -99,6 +101,13 @@ const ProfileItem: React.FC<Props> = (props) => {
       {
         key: 'edit-rules',
         label: t('profiles.editRules.title'),
+        showDivider: false,
+        color: 'default',
+        className: ''
+      } as MenuItem,
+      {
+        key: 'smart-policy',
+        label: t('profiles.smartPolicy.title', { defaultValue: 'Smart 策略覆盖' }),
         showDivider: false,
         color: 'default',
         className: ''
@@ -151,6 +160,10 @@ const ProfileItem: React.FC<Props> = (props) => {
       }
       case 'edit-rules': {
         setOpenRulesEditor(true)
+        break
+      }
+      case 'smart-policy': {
+        setOpenSmartPolicyEditor(true)
         break
       }
       case 'open-file': {
@@ -233,6 +246,27 @@ const ProfileItem: React.FC<Props> = (props) => {
       {openRulesEditor && <EditRulesModal id={info.id} onClose={() => setOpenRulesEditor(false)} />}
       {openQrCode && info.url && (
         <QrCodeModal url={info.url} onClose={() => setOpenQrCode(false)} />
+      )}
+      {openSmartPolicyEditor && (
+        <SmartPolicyEditorModal
+          title={`${info.name} Smart Policy Override`}
+          profileMode
+          overrideMode={info.smartPolicyOverride?.mode || 'inherit'}
+          policies={info.smartPolicyOverride?.policies || []}
+          onClose={() => setOpenSmartPolicyEditor(false)}
+          onSave={async (policies, mode) => {
+            const next = {
+              ...info,
+              smartPolicyOverride: {
+                mode: mode || 'inherit',
+                policies
+              }
+            }
+            await updateProfileItem(next)
+            mutateProfileConfig()
+            await restartCore()
+          }}
+        />
       )}
       {openInfoEditor && (
         <EditInfoModal

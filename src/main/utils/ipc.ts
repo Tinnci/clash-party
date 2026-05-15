@@ -186,7 +186,8 @@ async function setRuleStr(id: string, str: string): Promise<void> {
 async function getSmartOverrideContent(): Promise<string | null> {
   try {
     const override = await getOverrideItem('smart-core-override')
-    return override?.file || null
+    if (!override) return null
+    return await getOverride('smart-core-override', 'js')
   } catch {
     return null
   }

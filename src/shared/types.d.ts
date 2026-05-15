@@ -47,6 +47,37 @@ interface IAppVersion {
   changelog: string
 }
 
+type SmartOverrideMode = 'off' | 'compat' | 'respect-rules' | 'policy-aware'
+type SmartPolicyCategory = 'ai' | 'finance' | 'streaming' | 'custom'
+type SmartPolicyGroupType = 'smart' | 'fallback' | 'url-test'
+type SmartPolicyStrategy = 'sticky-sessions' | 'round-robin'
+type SmartPolicyOverrideMode = 'inherit' | 'off' | 'replace' | 'append'
+
+interface ISmartPolicy {
+  id: string
+  name: string
+  enabled: boolean
+  category: SmartPolicyCategory
+  groupName: string
+  groupType: SmartPolicyGroupType
+  matchRules: string[]
+  includeFilter?: string
+  excludeFilter?: string
+  useAllProxies: boolean
+  useProviders?: string[]
+  strategy: SmartPolicyStrategy
+  useLightGBM?: boolean
+  collectData?: boolean
+  policyPriority?: string
+  testUrl?: string
+  interval?: number
+}
+
+interface ISmartPolicyOverride {
+  mode?: SmartPolicyOverrideMode
+  policies?: ISmartPolicy[]
+}
+
 interface IMihomoVersion {
   version: string
   meta: boolean
@@ -246,9 +277,11 @@ interface IAppConfig {
   specificVersion?: string
   enableSmartCore: boolean
   enableSmartOverride: boolean
+  smartOverrideMode?: SmartOverrideMode
+  smartPolicies?: ISmartPolicy[]
   smartCoreUseLightGBM: boolean
   smartCoreCollectData: boolean
-  smartCoreStrategy: 'sticky-sessions' | 'round-robin'
+  smartCoreStrategy: SmartPolicyStrategy
   smartCollectorSize?: number
   proxyDisplayMode: 'simple' | 'full'
   proxyDisplayOrder: 'default' | 'delay' | 'name'
@@ -538,6 +571,7 @@ interface IProfileItem {
   authToken?: string
   userAgent?: string
   updateTimeout?: number
+  smartPolicyOverride?: ISmartPolicyOverride
 }
 
 interface ISubStoreSub {

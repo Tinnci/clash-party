@@ -46,6 +46,7 @@ import {
 } from '@renderer/utils/ipc'
 import React, { useState, useEffect, useRef } from 'react'
 import InterfaceModal from '@renderer/components/mihomo/interface-modal'
+import SmartPolicyEditorModal from '@renderer/components/smart-policy-editor-modal'
 import { MdDeleteForever, MdEdit, MdDelete, MdOpenInNew } from 'react-icons/md'
 import { useTranslation } from 'react-i18next'
 
@@ -92,6 +93,8 @@ const Mihomo: React.FC = () => {
     specificVersion,
     enableSmartCore = false,
     enableSmartOverride = true,
+    smartOverrideMode = enableSmartOverride ? 'compat' : 'off',
+    smartPolicies = [],
     smartCoreUseLightGBM = false,
     smartCoreCollectData = false,
     smartCoreStrategy = 'sticky-sessions',
@@ -153,6 +156,7 @@ const Mihomo: React.FC = () => {
   const [skipAuthPrefixesInput, setSkipAuthPrefixesInput] = useState(skipAuthPrefixes)
   const [upgrading, setUpgrading] = useState(false)
   const [lanOpen, setLanOpen] = useState(false)
+  const [smartPolicyEditorOpen, setSmartPolicyEditorOpen] = useState(false)
   const { isOpen, onOpen, onClose } = useDisclosure()
   const [tags, setTags] = useState<{ name: string; zipball_url: string; tarball_url: string }[]>([])
   const [loadingTags, setLoadingTags] = useState(false)
@@ -423,6 +427,17 @@ const Mihomo: React.FC = () => {
   return (
     <>
       {lanOpen && <InterfaceModal onClose={() => setLanOpen(false)} />}
+      {smartPolicyEditorOpen && (
+        <SmartPolicyEditorModal
+          title="Smart Policy Editor"
+          policies={smartPolicies}
+          onClose={() => setSmartPolicyEditorOpen(false)}
+          onSave={async (policies) => {
+            await patchAppConfig({ smartPolicies: policies })
+            await restartCore()
+          }}
+        />
+      )}
       <BasePage title={t('mihomo.title')}>
         {/* Smart 内核设置 */}
         <SettingCard>
@@ -449,14 +464,16 @@ const Mihomo: React.FC = () => {
               />
             </SettingItem>
 
-            {/* Smart 覆写开关 */}
             {enableSmartCore && core === 'mihomo-smart' && (
               <SettingItem
                 title={
                   <div className="flex items-center gap-2">
-                    <span>{t('mihomo.enableSmartOverride')}</span>
+                    <span>{t('mihomo.smartOverrideMode', { defaultValue: 'Smart 覆写模式' })}</span>
                     <Tooltip
-                      content={t('mihomo.smartOverrideTooltip')}
+                      content={t('mihomo.smartOverrideModeTooltip', {
+                        defaultValue:
+                          '兼容旧版会接管规则出口；策略感知会保留规则语义并为不同业务生成独立 Smart 节点池。'
+                      })}
                       placement="top"
                       className="max-w-xs"
                     >
@@ -466,15 +483,54 @@ const Mihomo: React.FC = () => {
                 }
                 divider={core === 'mihomo-smart'}
               >
-                <Switch
-                  size="sm"
-                  isSelected={enableSmartOverride}
-                  color="primary"
-                  onValueChange={async (v) => {
-                    await patchAppConfig({ enableSmartOverride: v })
-                    await mihomoHotReloadConfig()
-                  }}
-                />
+                <div className="flex items-center gap-2">
+                  <Select
+                    className="w-[180px]"
+                    size="sm"
+                    aria-label={t('mihomo.smartOverrideMode', { defaultValue: 'Smart 覆写模式' })}
+                    selectedKeys={new Set([smartOverrideMode])}
+                    disallowEmptySelection
+                    onSelectionChange={async (v) => {
+                      const mode = v.currentKey as SmartOverrideMode
+                      await patchAppConfig({
+                        smartOverrideMode: mode,
+                        enableSmartOverride: mode !== 'off'
+                      })
+                      await restartCore()
+                    }}
+                  >
+                    <SelectItem key="off">
+                      {t('mihomo.smartOverrideModeOff', { defaultValue: '关闭' })}
+                    </SelectItem>
+                    <SelectItem key="compat">
+                      {t('mihomo.smartOverrideModeCompat', { defaultValue: '兼容旧版' })}
+                    </SelectItem>
+                    <SelectItem key="respect-rules">
+                      {t('mihomo.smartOverrideModeRespectRules', { defaultValue: '尊重现有规则' })}
+                    </SelectItem>
+                    <SelectItem key="policy-aware">
+                      {t('mihomo.smartOverrideModePolicyAware', { defaultValue: '策略感知' })}
+                    </SelectItem>
+                  </Select>
+                  {smartOverrideMode === 'policy-aware' && (
+                    <Button size="sm" variant="flat" onPress={() => setSmartPolicyEditorOpen(true)}>
+                      {t('mihomo.manageSmartPolicies', { defaultValue: '管理策略' })}
+                    </Button>
+                  )}
+                </div>
+              </SettingItem>
+            )}
+
+            {enableSmartCore && core === 'mihomo-smart' && smartOverrideMode === 'compat' && (
+              <SettingItem
+                title={t('mihomo.smartOverrideCompatWarning', {
+                  defaultValue: '兼容旧版会将非直连规则集中改写到 Smart Group。'
+                })}
+                divider
+              >
+                <Chip size="sm" color="warning" variant="flat">
+                  Compat
+                </Chip>
               </SettingItem>
             )}
 

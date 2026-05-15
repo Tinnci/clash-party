@@ -4,369 +4,378 @@ import { addOverrideItem, removeOverrideItem, getOverrideItem } from './override
 
 const SMART_OVERRIDE_ID = 'smart-core-override'
 
-/**
- * Smart 内核的覆写配置模板
- */
-function generateSmartOverrideTemplate(
-  useLightGBM: boolean,
-  collectData: boolean,
-  strategy: string,
+interface SmartOverrideBuildConfig {
+  mode: SmartOverrideMode
+  useLightGBM: boolean
+  collectData: boolean
+  strategy: SmartPolicyStrategy
   collectorSize: number
-): string {
-  return `
-// 配置会在启用 Smart 内核时自动应用
+  policies: ISmartPolicy[]
+}
 
+function js(value: unknown): string {
+  return JSON.stringify(value)
+}
+
+function getMode(config: IAppConfig): SmartOverrideMode {
+  if (config.smartOverrideMode) return config.smartOverrideMode
+  return config.enableSmartOverride === false ? 'off' : 'compat'
+}
+
+function normalizePolicy(policy: ISmartPolicy, defaults: SmartOverrideBuildConfig): ISmartPolicy {
+  return {
+    ...policy,
+    enabled: policy.enabled !== false,
+    category: policy.category || 'custom',
+    groupType: policy.groupType || 'smart',
+    matchRules: Array.isArray(policy.matchRules) ? policy.matchRules.filter(Boolean) : [],
+    useAllProxies: policy.useAllProxies !== false,
+    strategy: policy.strategy || defaults.strategy,
+    useLightGBM: policy.useLightGBM ?? defaults.useLightGBM,
+    collectData: policy.collectData ?? defaults.collectData,
+    interval: policy.interval || 300
+  }
+}
+
+export function normalizeSmartPolicies(
+  globalPolicies: ISmartPolicy[] = [],
+  override?: ISmartPolicyOverride,
+  defaults?: SmartOverrideBuildConfig
+): ISmartPolicy[] {
+  const baseDefaults =
+    defaults ||
+    ({
+      mode: 'policy-aware',
+      useLightGBM: false,
+      collectData: false,
+      strategy: 'sticky-sessions',
+      collectorSize: 100,
+      policies: []
+    } as SmartOverrideBuildConfig)
+  const normalizedGlobal = globalPolicies.map((policy) => normalizePolicy(policy, baseDefaults))
+  const overridePolicies = (override?.policies || []).map((policy) =>
+    normalizePolicy(policy, baseDefaults)
+  )
+
+  switch (override?.mode) {
+    case 'off':
+      return []
+    case 'replace':
+      return overridePolicies
+    case 'append':
+      return [...normalizedGlobal, ...overridePolicies]
+    case 'inherit':
+    default:
+      return normalizedGlobal
+  }
+}
+
+function buildCompatOverride(config: SmartOverrideBuildConfig): string {
+  return `
 function main(config) {
   try {
-    // 确保配置对象存在
-    if (!config || typeof config !== 'object') {
-      console.log('[Smart Override] Invalid config object')
-      return config
-    }
+    if (!config || typeof config !== 'object') return config
+    if (!config.profile) config.profile = {}
+    config.profile['smart-collector-size'] = ${config.collectorSize}
+    if (!Array.isArray(config['proxy-groups'])) config['proxy-groups'] = []
 
-    // 设置 Smart 内核的 profile 配置
-    if (!config.profile) {
-      config.profile = {}
-    }
-    config.profile['smart-collector-size'] = ${collectorSize}
-
-    // 确保代理组配置存在
-    if (!config['proxy-groups']) {
-      config['proxy-groups'] = []
-    }
-
-    // 确保代理组是数组
-    if (!Array.isArray(config['proxy-groups'])) {
-      console.log('[Smart Override] proxy-groups is not an array, converting...')
-      config['proxy-groups'] = []
-    }
-
-    // 首先检查是否存在 url-test 或 load-balance 代理组
     let hasUrlTestOrLoadBalance = false
-    for (let i = 0; i < config['proxy-groups'].length; i++) {
-      const group = config['proxy-groups'][i]
-      if (group && group.type) {
-        const groupType = group.type.toLowerCase()
-        if (groupType === 'url-test' || groupType === 'load-balance') {
-          hasUrlTestOrLoadBalance = true
-          break
-        }
-      }
-    }
-
-    // 如果存在 url-test 或 load-balance 代理组，只进行类型转换
-    if (hasUrlTestOrLoadBalance) {
-      console.log('[Smart Override] Found url-test or load-balance groups, converting to smart type')
-      
-      // 记录需要更新引用的代理组名称映射
-      const nameMapping = new Map()
-      
-      for (let i = 0; i < config['proxy-groups'].length; i++) {
-        const group = config['proxy-groups'][i]
-        if (group && group.type) {
-          const groupType = group.type.toLowerCase()
-          if (groupType === 'url-test' || groupType === 'load-balance') {
-            console.log('[Smart Override] Converting group:', group.name, 'from', group.type, 'to smart')
-            
-            // 记录原名称和新名称的映射关系
-            const originalName = group.name
-            
-            // 保留原有配置，只修改 type 和添加 Smart 特有配置
-            group.type = 'smart'
-            
-            // 为代理组名称添加 (Smart Group) 后缀
-            if (group.name && !group.name.includes('(Smart Group)')) {
-              group.name = group.name + '(Smart Group)'
-              nameMapping.set(originalName, group.name)
-            }
-            
-            // 添加 Smart 特有配置
-            if (!group['policy-priority']) {
-              group['policy-priority'] = ''  // policy-priority: <1 means lower priority, >1 means higher priority, the default is 1, pattern support regex and string
-            }
-            group.uselightgbm = ${useLightGBM}
-            group.collectdata = ${collectData}
-            group.strategy = '${strategy}'
-            
-            // 移除 url-test 和 load-balance 特有的配置
-            if (group.url) delete group.url
-            if (group.interval) delete group.interval
-            if (group.tolerance) delete group.tolerance
-            if (group.lazy) delete group.lazy
-            if (group.expected_status) delete group['expected-status']
-          }
-        }
-      }
-      
-      // 更新配置文件中其他位置对代理组名称的引用
-      if (nameMapping.size > 0) {
-        console.log('[Smart Override] Updating references to renamed groups:', Array.from(nameMapping.entries()))
-        
-        // 更新代理组中的 proxies 字段引用
-        if (config['proxy-groups'] && Array.isArray(config['proxy-groups'])) {
-          config['proxy-groups'].forEach(group => {
-            if (group && group.proxies && Array.isArray(group.proxies)) {
-              group.proxies = group.proxies.map(proxyName => {
-                if (nameMapping.has(proxyName)) {
-                  console.log('[Smart Override] Updated proxy reference:', proxyName, '→', nameMapping.get(proxyName))
-                  return nameMapping.get(proxyName)
-                }
-                return proxyName
-              })
-            }
-          })
-        }
-        
-        // 更新规则中的代理组引用
-        // 规则参数列表，这些不是策略组名称
-        const ruleParamsSet = new Set(['no-resolve', 'force-remote-dns', 'prefer-ipv6'])
-        
-        if (config.rules && Array.isArray(config.rules)) {
-          config.rules = config.rules.map(rule => {
-            if (typeof rule === 'string') {
-              // 按逗号分割规则，精确匹配策略组名称位置
-              const parts = rule.split(',').map(part => part.trim())
-              
-              if (parts.length >= 2) {
-                // 找到策略组名称的位置
-                let targetIndex = -1
-                
-                // MATCH 规则：MATCH，策略组
-                if (parts[0] === 'MATCH' && parts.length === 2) {
-                  targetIndex = 1
-                } else if (parts.length >= 3) {
-                  // 其他规则：TYPE,MATCHER，策略组 [,参数...]
-                  // 策略组通常在第 3 个位置（索引 2），但需要跳过参数
-                  for (let i = 2; i < parts.length; i++) {
-                    if (!ruleParamsSet.has(parts[i])) {
-                      targetIndex = i
-                      break
-                    }
-                  }
-                }
-                
-                // 只替换策略组名称位置
-                if (targetIndex !== -1 && nameMapping.has(parts[targetIndex])) {
-                  const oldName = parts[targetIndex]
-                  parts[targetIndex] = nameMapping.get(oldName)
-                  console.log('[Smart Override] Updated rule reference:', oldName, '→', nameMapping.get(oldName))
-                  return parts.join(',')
-                }
-              }
-              return rule
-            } else if (typeof rule === 'object' && rule !== null) {
-              // 处理对象格式的规则
-              ['target', 'proxy'].forEach(field => {
-                if (rule[field] && nameMapping.has(rule[field])) {
-                  console.log('[Smart Override] Updated rule object reference:', rule[field], '→', nameMapping.get(rule[field]))
-                  rule[field] = nameMapping.get(rule[field])
-                }
-              })
-            }
-            return rule
-          })
-        }
-        
-        // 更新其他可能的配置字段引用
-        ['mode', 'proxy-mode'].forEach(field => {
-          if (config[field] && nameMapping.has(config[field])) {
-            console.log('[Smart Override] Updated config field', field + ':', config[field], '→', nameMapping.get(config[field]))
-            config[field] = nameMapping.get(config[field])
-          }
-        })
-      }
-      
-      console.log('[Smart Override] Conversion completed, skipping other operations')
-      return config
-    }
-
-    // 如果没有 url-test 或 load-balance 代理组，执行原有逻辑
-    console.log('[Smart Override] No url-test or load-balance groups found, executing original logic')
-    
-    // 查找现有的 Smart 代理组并更新
-    let smartGroupExists = false
-    for (let i = 0; i < config['proxy-groups'].length; i++) {
-      const group = config['proxy-groups'][i]
-      if (group && group.type === 'smart') {
-        smartGroupExists = true
-        console.log('[Smart Override] Found existing smart group:', group.name)
-
-        if (!group['policy-priority']) {
-          group['policy-priority'] = ''  // policy-priority: <1 means lower priority, >1 means higher priority, the default is 1, pattern support regex and string
-        }
-        group.uselightgbm = ${useLightGBM}
-        group.collectdata = ${collectData}
-        group.strategy = '${strategy}'
+    for (const group of config['proxy-groups']) {
+      const type = String(group && group.type || '').toLowerCase()
+      if (type === 'url-test' || type === 'load-balance') {
+        hasUrlTestOrLoadBalance = true
         break
       }
     }
 
-    // 如果没有 Smart 组且有可用代理，创建示例组
-    if (!smartGroupExists && config.proxies && Array.isArray(config.proxies) && config.proxies.length > 0) {
-      console.log('[Smart Override] Creating new smart group with', config.proxies.length, 'proxies')
-
-      // 获取所有代理的名称
-      const proxyNames = config.proxies
-        .filter(proxy => proxy && typeof proxy === 'object' && proxy.name)
-        .map(proxy => proxy.name)
-
-      if (proxyNames.length > 0) {
-        const smartGroup = {
-          name: 'Smart Group',
-          type: 'smart',
-          'policy-priority': '',  // policy-priority: <1 means lower priority, >1 means higher priority, the default is 1, pattern support regex and string
-          uselightgbm: ${useLightGBM},
-          collectdata: ${collectData},
-          strategy: '${strategy}',
-          proxies: proxyNames
+    if (hasUrlTestOrLoadBalance) {
+      const nameMapping = new Map()
+      for (const group of config['proxy-groups']) {
+        const type = String(group && group.type || '').toLowerCase()
+        if (type !== 'url-test' && type !== 'load-balance') continue
+        const originalName = group.name
+        group.type = 'smart'
+        if (group.name && !group.name.includes('(Smart Group)')) {
+          group.name = group.name + '(Smart Group)'
+          nameMapping.set(originalName, group.name)
         }
-        config['proxy-groups'].unshift(smartGroup)
-        console.log('[Smart Override] Created smart group at first position with proxies:', proxyNames)
-      } else {
-        console.log('[Smart Override] No valid proxies found, skipping smart group creation')
-      }
-    } else if (!smartGroupExists) {
-      console.log('[Smart Override] No proxies available, skipping smart group creation')
-    }
-
-    // 处理规则替换
-    if (config.rules && Array.isArray(config.rules)) {
-      console.log('[Smart Override] Processing rules, original count:', config.rules.length)
-
-      // 收集所有代理组名称
-      const proxyGroupNames = new Set()
-      if (config['proxy-groups'] && Array.isArray(config['proxy-groups'])) {
-        config['proxy-groups'].forEach(group => {
-          if (group && group.name) {
-            proxyGroupNames.add(group.name)
-          }
-        })
+        group['policy-priority'] = group['policy-priority'] || ''
+        group.uselightgbm = ${config.useLightGBM}
+        group.collectdata = ${config.collectData}
+        group.strategy = '${config.strategy}'
+        delete group.url
+        delete group.interval
+        delete group.tolerance
+        delete group.lazy
+        delete group['expected-status']
       }
 
-      // 添加常见的内置目标
-      const builtinTargets = new Set([
-        'DIRECT',
-        'REJECT',
-        'REJECT-DROP',
-        'PASS',
-        'COMPATIBLE'
-      ])
-
-      // 添加常见的规则参数，不应该替换
-      const ruleParams = new Set(['no-resolve', 'force-remote-dns', 'prefer-ipv6'])
-
-      console.log('[Smart Override] Found', proxyGroupNames.size, 'proxy groups:', Array.from(proxyGroupNames))
-
-      let replacedCount = 0
-      config.rules = config.rules.map(rule => {
-        if (typeof rule === 'string') {
-          // 检查是否是复杂规则格式（包含括号的嵌套规则）
-          if (rule.includes('((') || rule.includes('))')) {
-            console.log('[Smart Override] Skipping complex nested rule:', rule)
-            return rule
+      if (nameMapping.size > 0) {
+        for (const group of config['proxy-groups']) {
+          if (Array.isArray(group && group.proxies)) {
+            group.proxies = group.proxies.map((name) => nameMapping.get(name) || name)
           }
-
-          // 处理字符串格式的规则
-          const parts = rule.split(',').map(part => part.trim())
-          if (parts.length >= 2) {
-            // 找到代理组名称的位置
+        }
+        if (Array.isArray(config.rules)) {
+          const ruleParams = new Set(['no-resolve', 'force-remote-dns', 'prefer-ipv6'])
+          config.rules = config.rules.map((rule) => {
+            if (typeof rule !== 'string') return rule
+            const parts = rule.split(',').map((part) => part.trim())
             let targetIndex = -1
-            let targetValue = ''
-
-            // 处理 MATCH 规则
             if (parts[0] === 'MATCH' && parts.length === 2) {
               targetIndex = 1
-              targetValue = parts[1]
             } else if (parts.length >= 3) {
-              // 处理其他规则
               for (let i = 2; i < parts.length; i++) {
-                const part = parts[i]
-                if (!ruleParams.has(part)) {
+                if (!ruleParams.has(parts[i])) {
                   targetIndex = i
-                  targetValue = part
                   break
                 }
               }
             }
-
-            if (targetIndex !== -1 && targetValue) {
-              // 检查是否应该替换
-              const shouldReplace = !builtinTargets.has(targetValue) &&
-                                   (proxyGroupNames.has(targetValue) ||
-                                    !ruleParams.has(targetValue))
-
-              if (shouldReplace) {
-                parts[targetIndex] = 'Smart Group'
-                replacedCount++
-                console.log('[Smart Override] Replaced rule target:', targetValue, '→ Smart Group')
-                return parts.join(',')
-              }
+            if (targetIndex !== -1 && targetIndex < parts.length && nameMapping.has(parts[targetIndex])) {
+              parts[targetIndex] = nameMapping.get(parts[targetIndex])
+              return parts.join(',')
             }
-          }
-        } else if (typeof rule === 'object' && rule !== null) {
-          // 处理对象格式
-          let targetField = ''
-          let targetValue = ''
+            return rule
+          })
+        }
+      }
+      return config
+    }
 
-          if (rule.target) {
-            targetField = 'target'
-            targetValue = rule.target
-          } else if (rule.proxy) {
-            targetField = 'proxy'
-            targetValue = rule.proxy
-          }
+    let smartGroupExists = false
+    for (const group of config['proxy-groups']) {
+      if (group && group.type === 'smart') {
+        smartGroupExists = true
+        group['policy-priority'] = group['policy-priority'] || ''
+        group.uselightgbm = ${config.useLightGBM}
+        group.collectdata = ${config.collectData}
+        group.strategy = '${config.strategy}'
+        break
+      }
+    }
 
-          if (targetField && targetValue) {
-            const shouldReplace = !builtinTargets.has(targetValue) &&
-                                 (proxyGroupNames.has(targetValue) ||
-                                  !ruleParams.has(targetValue))
+    if (!smartGroupExists && Array.isArray(config.proxies)) {
+      const proxyNames = config.proxies.filter((proxy) => proxy && proxy.name).map((proxy) => proxy.name)
+      if (proxyNames.length > 0) {
+        config['proxy-groups'].unshift({
+          name: 'Smart Group',
+          type: 'smart',
+          'policy-priority': '',
+          uselightgbm: ${config.useLightGBM},
+          collectdata: ${config.collectData},
+          strategy: '${config.strategy}',
+          proxies: proxyNames
+        })
+      }
+    }
 
-            if (shouldReplace) {
-              rule[targetField] = 'Smart Group'
-              replacedCount++
-              console.log('[Smart Override] Replaced rule target:', targetValue, '→ Smart Group')
+    if (Array.isArray(config.rules)) {
+      const proxyGroupNames = new Set(config['proxy-groups'].filter((group) => group && group.name).map((group) => group.name))
+      const builtinTargets = new Set(['DIRECT', 'REJECT', 'REJECT-DROP', 'PASS', 'COMPATIBLE'])
+      const ruleParams = new Set(['no-resolve', 'force-remote-dns', 'prefer-ipv6'])
+      config.rules = config.rules.map((rule) => {
+        if (typeof rule !== 'string' || rule.includes('((') || rule.includes('))')) return rule
+        const parts = rule.split(',').map((part) => part.trim())
+        let targetIndex = -1
+        if (parts[0] === 'MATCH' && parts.length === 2) targetIndex = 1
+        else if (parts.length >= 3) {
+          for (let i = 2; i < parts.length; i++) {
+            if (!ruleParams.has(parts[i])) {
+              targetIndex = i
+              break
             }
           }
         }
+        if (targetIndex === -1) return rule
+        const target = parts[targetIndex]
+        if (!builtinTargets.has(target) && (proxyGroupNames.has(target) || !ruleParams.has(target))) {
+          parts[targetIndex] = 'Smart Group'
+          return parts.join(',')
+        }
         return rule
       })
-
-      console.log('[Smart Override] Rules processed, replaced', replacedCount, 'non-DIRECT rules with Smart Group')
-    } else {
-      console.log('[Smart Override] No rules found or rules is not an array')
     }
 
-    console.log('[Smart Override] Configuration processed successfully')
     return config
   } catch (error) {
-    console.error('[Smart Override] Error processing config:', error)
-    // 发生错误时返回原始配置，避免破坏整个配置
+    console.error('[Smart Override] compat mode failed:', error)
     return config
   }
 }
 `
 }
 
-/**
- * 创建或更新 Smart 内核覆写配置
- */
+function buildRespectRulesOverride(config: SmartOverrideBuildConfig): string {
+  return `
+function main(config) {
+  try {
+    if (!config || typeof config !== 'object') return config
+    if (!config.profile) config.profile = {}
+    config.profile['smart-collector-size'] = ${config.collectorSize}
+    if (!Array.isArray(config['proxy-groups'])) return config
+    for (const group of config['proxy-groups']) {
+      if (!group || group.type !== 'smart') continue
+      group['policy-priority'] = group['policy-priority'] || ''
+      group.uselightgbm = ${config.useLightGBM}
+      group.collectdata = ${config.collectData}
+      group.strategy = group.strategy || '${config.strategy}'
+    }
+    return config
+  } catch (error) {
+    console.error('[Smart Override] respect-rules mode failed:', error)
+    return config
+  }
+}
+`
+}
+
+function buildPolicyAwareOverride(config: SmartOverrideBuildConfig): string {
+  const enabledPolicies = config.policies
+    .map((policy) => normalizePolicy(policy, config))
+    .filter((policy) => policy.enabled && policy.groupName && policy.matchRules.length > 0)
+
+  return `
+const smartPolicies = ${js(enabledPolicies)}
+
+function uniqueGroupName(baseName, usedNames) {
+  if (!usedNames.has(baseName)) {
+    usedNames.add(baseName)
+    return baseName
+  }
+  let candidate = baseName + ' (Smart Policy)'
+  let index = 2
+  while (usedNames.has(candidate)) {
+    candidate = baseName + ' (Smart Policy ' + index + ')'
+    index++
+  }
+  usedNames.add(candidate)
+  console.log('[Smart Override] Renamed duplicated policy group:', baseName, '->', candidate)
+  return candidate
+}
+
+function policyToGroup(policy, groupName, config) {
+  const group = {
+    name: groupName,
+    type: policy.groupType || 'smart'
+  }
+  if (policy.includeFilter) group.filter = policy.includeFilter
+  if (policy.excludeFilter) group['exclude-filter'] = policy.excludeFilter
+  if (Array.isArray(policy.useProviders) && policy.useProviders.length > 0) group.use = policy.useProviders
+
+  if (policy.useAllProxies !== false) {
+    group['include-all-proxies'] = true
+  } else if (!group.use && Array.isArray(config.proxies)) {
+    group.proxies = config.proxies.filter((proxy) => proxy && proxy.name).map((proxy) => proxy.name)
+  }
+
+  if (group.type === 'smart') {
+    group.strategy = policy.strategy || '${config.strategy}'
+    group.uselightgbm = policy.useLightGBM ?? ${config.useLightGBM}
+    group.collectdata = policy.collectData ?? ${config.collectData}
+    group['policy-priority'] = policy.policyPriority || ''
+  } else {
+    group.url = policy.testUrl || 'http://www.gstatic.com/generate_204'
+    group.interval = policy.interval || 300
+  }
+
+  return group
+}
+
+function policyRuleToTargetedRule(rule, groupName) {
+  const parts = String(rule).split(',').map((part) => part.trim()).filter(Boolean)
+  if (parts.length === 0) return ''
+  if (parts[0] === 'MATCH') return 'MATCH,' + groupName
+  if (parts.length >= 3) {
+    parts[2] = groupName
+    return parts.join(',')
+  }
+  return parts.concat(groupName).join(',')
+}
+
+function main(config) {
+  try {
+    if (!config || typeof config !== 'object') return config
+    if (!config.profile) config.profile = {}
+    config.profile['smart-collector-size'] = ${config.collectorSize}
+    if (!Array.isArray(config['proxy-groups'])) config['proxy-groups'] = []
+    if (!Array.isArray(config.rules)) config.rules = []
+
+    const usedNames = new Set(config['proxy-groups'].filter((group) => group && group.name).map((group) => group.name))
+    const generatedGroups = []
+    const generatedRules = []
+
+    for (const policy of smartPolicies) {
+      const groupName = uniqueGroupName(policy.groupName, usedNames)
+      generatedGroups.push(policyToGroup(policy, groupName, config))
+      for (const rule of policy.matchRules || []) {
+        const targetedRule = policyRuleToTargetedRule(rule, groupName)
+        if (targetedRule) generatedRules.push(targetedRule)
+      }
+    }
+
+    config['proxy-groups'] = generatedGroups.concat(config['proxy-groups'])
+    config.rules = generatedRules.concat(config.rules)
+    console.log('[Smart Override] policy-aware mode generated', generatedGroups.length, 'groups and', generatedRules.length, 'rules')
+    return config
+  } catch (error) {
+    console.error('[Smart Override] policy-aware mode failed:', error)
+    return config
+  }
+}
+`
+}
+
+export function buildSmartOverride(config: SmartOverrideBuildConfig): string {
+  switch (config.mode) {
+    case 'compat':
+      return buildCompatOverride(config)
+    case 'respect-rules':
+      return buildRespectRulesOverride(config)
+    case 'policy-aware':
+      return buildPolicyAwareOverride(config)
+    case 'off':
+    default:
+      return ''
+  }
+}
+
+async function getCurrentProfileSmartPolicyOverride(): Promise<ISmartPolicyOverride | undefined> {
+  const { getProfileConfig, getProfileItem } = await import('./profile')
+  const { current } = await getProfileConfig()
+  const item = await getProfileItem(current)
+  return item?.smartPolicyOverride
+}
+
 export async function createSmartOverride(): Promise<void> {
   try {
-    // 获取应用配置
+    const appConfig = await getAppConfig()
     const {
       smartCoreUseLightGBM = false,
       smartCoreCollectData = false,
       smartCoreStrategy = 'sticky-sessions',
-      smartCollectorSize = 100
-    } = await getAppConfig()
-
-    // 生成覆写模板
-    const template = generateSmartOverrideTemplate(
-      smartCoreUseLightGBM,
-      smartCoreCollectData,
-      smartCoreStrategy,
-      smartCollectorSize
-    )
+      smartCollectorSize = 100,
+      smartPolicies = []
+    } = appConfig
+    const mode = getMode(appConfig)
+    const profileOverride = await getCurrentProfileSmartPolicyOverride()
+    const buildConfig: SmartOverrideBuildConfig = {
+      mode,
+      useLightGBM: smartCoreUseLightGBM,
+      collectData: smartCoreCollectData,
+      strategy: smartCoreStrategy,
+      collectorSize: smartCollectorSize,
+      policies: []
+    }
+    buildConfig.policies =
+      mode === 'policy-aware'
+        ? normalizeSmartPolicies(smartPolicies, profileOverride, buildConfig)
+        : normalizeSmartPolicies(smartPolicies, undefined, buildConfig)
+    const template = buildSmartOverride(buildConfig)
+    if (!template) {
+      await removeSmartOverride()
+      return
+    }
 
     await addOverrideItem({
       id: SMART_OVERRIDE_ID,
@@ -382,9 +391,6 @@ export async function createSmartOverride(): Promise<void> {
   }
 }
 
-/**
- * 删除 Smart 内核覆写配置
- */
 export async function removeSmartOverride(): Promise<void> {
   try {
     const existingOverride = await getOverrideItem(SMART_OVERRIDE_ID)
@@ -397,22 +403,18 @@ export async function removeSmartOverride(): Promise<void> {
   }
 }
 
-/**
- * 根据应用配置管理 Smart 覆写
- */
 export async function manageSmartOverride(): Promise<void> {
-  const { enableSmartCore = true, enableSmartOverride = true, core } = await getAppConfig()
+  const appConfig = await getAppConfig()
+  const { enableSmartCore = true, core } = appConfig
+  const mode = getMode(appConfig)
 
-  if (enableSmartCore && enableSmartOverride && core === 'mihomo-smart') {
+  if (enableSmartCore && mode !== 'off' && core === 'mihomo-smart') {
     await createSmartOverride()
   } else {
     await removeSmartOverride()
   }
 }
 
-/**
- * 检查 Smart 覆写是否存在
- */
 export async function isSmartOverrideExists(): Promise<boolean> {
   try {
     const override = await getOverrideItem(SMART_OVERRIDE_ID)

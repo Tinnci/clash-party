@@ -5,15 +5,9 @@ const windowsShell = process.env.ComSpec || process.env.COMSPEC || 'cmd.exe'
 
 const runners = [
   {
-    probe: 'pnpm',
+    probe: 'bun',
     run(command) {
-      return `pnpm ${command}`
-    }
-  },
-  {
-    probe: 'corepack',
-    run(command) {
-      return `corepack pnpm ${command}`
+      return `bun ${command}`
     }
   }
 ]
@@ -63,7 +57,7 @@ function printDivider() {
 const runner = runners.find(({ probe }) => commandExists(probe))
 
 if (!runner) {
-  console.error('[pre-commit] Unable to find pnpm or corepack in PATH.')
+  console.error('[pre-commit] Unable to find bun in PATH.')
   process.exit(1)
 }
 

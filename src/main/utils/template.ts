@@ -1,7 +1,11 @@
+import { cloneDefaultSmartPolicies } from '../../shared/smartPolicies'
+
 export const defaultConfig: IAppConfig = {
   core: 'mihomo',
   enableSmartCore: false,
   enableSmartOverride: true,
+  smartOverrideMode: 'policy-aware',
+  smartPolicies: cloneDefaultSmartPolicies(),
   smartCoreUseLightGBM: false,
   smartCoreCollectData: false,
   smartCoreStrategy: 'sticky-sessions',

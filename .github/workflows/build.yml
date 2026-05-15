@@ -15,12 +15,17 @@ env:
   BUN_VERSION: 1.3.3
   ELECTRON_MIRROR: ${{ vars.ELECTRON_MIRROR || 'https://npmmirror.com/mirrors/electron/' }}
   ELECTRON_BUILDER_BINARIES_MIRROR: ${{ vars.ELECTRON_BUILDER_BINARIES_MIRROR || 'https://npmmirror.com/mirrors/electron-builder-binaries/' }}
-  MIHOMO_VERSION_URL: ${{ vars.MIHOMO_VERSION_URL || 'https://github.com/MetaCubeX/mihomo/releases/latest/download/version.txt' }}
-  MIHOMO_URL_PREFIX: ${{ vars.MIHOMO_URL_PREFIX || 'https://github.com/MetaCubeX/mihomo/releases/download' }}
-  MIHOMO_ALPHA_VERSION_URL: ${{ vars.MIHOMO_ALPHA_VERSION_URL || 'https://github.com/MetaCubeX/mihomo/releases/download/Prerelease-Alpha/version.txt' }}
-  MIHOMO_ALPHA_URL_PREFIX: ${{ vars.MIHOMO_ALPHA_URL_PREFIX || 'https://github.com/MetaCubeX/mihomo/releases/download/Prerelease-Alpha' }}
-  MIHOMO_SMART_VERSION_URL: ${{ vars.MIHOMO_SMART_VERSION_URL || 'https://github.com/vernesong/mihomo/releases/download/Prerelease-Alpha/version.txt' }}
-  MIHOMO_SMART_URL_PREFIX: ${{ vars.MIHOMO_SMART_URL_PREFIX || 'https://github.com/vernesong/mihomo/releases/download/Prerelease-Alpha' }}
+  MIHOMO_VERSION_URL: ${{ vars.MIHOMO_VERSION_URL || 'https://github.com/Tinnci/mihomo/releases/download/Prerelease-Alpha/version.txt' }}
+  MIHOMO_VERSION: ${{ vars.MIHOMO_VERSION || '' }}
+  MIHOMO_URL_PREFIX: ${{ vars.MIHOMO_URL_PREFIX || 'https://github.com/Tinnci/mihomo/releases/download' }}
+  MIHOMO_RELEASE_URL_PREFIX: ${{ vars.MIHOMO_RELEASE_URL_PREFIX || 'https://github.com/Tinnci/mihomo/releases/download/Prerelease-Alpha' }}
+  MIHOMO_ALPHA_VERSION_URL: ${{ vars.MIHOMO_ALPHA_VERSION_URL || 'https://github.com/Tinnci/mihomo/releases/download/Prerelease-Alpha/version.txt' }}
+  MIHOMO_ALPHA_VERSION: ${{ vars.MIHOMO_ALPHA_VERSION || '' }}
+  MIHOMO_ALPHA_URL_PREFIX: ${{ vars.MIHOMO_ALPHA_URL_PREFIX || 'https://github.com/Tinnci/mihomo/releases/download/Prerelease-Alpha' }}
+  MIHOMO_SMART_VERSION_URL: ${{ vars.MIHOMO_SMART_VERSION_URL || 'https://github.com/Tinnci/mihomo/releases/download/Prerelease-Alpha/version.txt' }}
+  MIHOMO_SMART_VERSION: ${{ vars.MIHOMO_SMART_VERSION || '' }}
+  MIHOMO_SMART_URL_PREFIX: ${{ vars.MIHOMO_SMART_URL_PREFIX || 'https://github.com/Tinnci/mihomo/releases/download/Prerelease-Alpha' }}
+  MIHOMO_SMART_NAME_FLAVOR: ${{ vars.MIHOMO_SMART_NAME_FLAVOR || 'standard' }}
   SYSPROXY_RS_VERSION: ${{ vars.SYSPROXY_RS_VERSION || 'v0.1.0' }}
   SYSPROXY_RS_URL_PREFIX: ${{ vars.SYSPROXY_RS_URL_PREFIX || '' }}
   TRAFFIC_MONITOR_URL_PREFIX: ${{ vars.TRAFFIC_MONITOR_URL_PREFIX || 'https://github.com/mihomo-party-org/mihomo-party-run/releases/download/monitor' }}

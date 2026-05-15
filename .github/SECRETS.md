@@ -31,15 +31,20 @@ The workflows are ready to use Bun and locally maintained core release sources.
 - `LOCAL_BRANCH`: local maintenance branch for automatic sync. Default: `smart_core`.
 - `APPLE_INSTALLER_IDENTITY`: macOS installer signing identity.
 - `MIHOMO_VERSION_URL`: stable mihomo `version.txt` URL.
+- `MIHOMO_VERSION`: explicit stable mihomo artifact version. Used when `version.txt` is unavailable.
 - `MIHOMO_URL_PREFIX`: stable mihomo release download prefix.
+- `MIHOMO_RELEASE_URL_PREFIX`: exact stable mihomo release asset prefix. Use this for fixed tags such as `Prerelease-Alpha`.
 - `MIHOMO_ALPHA_VERSION_URL`: alpha mihomo `version.txt` URL.
+- `MIHOMO_ALPHA_VERSION`: explicit alpha mihomo artifact version. Used when `version.txt` is unavailable.
 - `MIHOMO_ALPHA_URL_PREFIX`: alpha mihomo release download prefix.
 - `MIHOMO_SMART_VERSION_URL`: Smart Core `version.txt` URL.
+- `MIHOMO_SMART_VERSION`: explicit Smart Core artifact version. Used when `version.txt` is unavailable.
 - `MIHOMO_SMART_URL_PREFIX`: Smart Core release download prefix.
+- `MIHOMO_SMART_NAME_FLAVOR`: Smart Core artifact naming flavor. Use `standard` for `Tinnci/mihomo`; use `go120` for legacy `vernesong/mihomo` assets.
 - `SYSPROXY_RS_VERSION`: sysproxy release version.
 - `SYSPROXY_RS_URL_PREFIX`: sysproxy release download prefix.
 - `TRAFFIC_MONITOR_URL_PREFIX`: TrafficMonitor download prefix.
 - `SUBSTORE_BUNDLE_URL`: Sub-Store backend bundle URL.
 - `SUBSTORE_FRONTEND_URL`: Sub-Store frontend zip URL.
 
-For self-maintained Smart Core builds, set at least `MIHOMO_SMART_VERSION_URL` and `MIHOMO_SMART_URL_PREFIX` to your own release.
+By default, the frontend embeds `mihomo`, `mihomo-alpha`, and `mihomo-smart` from `Tinnci/mihomo` `Prerelease-Alpha`. For a private fork, point the `MIHOMO_*` variables at that release and provide `CORE_DOWNLOAD_TOKEN`.

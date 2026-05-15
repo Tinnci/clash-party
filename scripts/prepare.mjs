@@ -29,14 +29,74 @@ function authHeaders() {
   return token ? { Authorization: `Bearer ${token}` } : {}
 }
 
+async function fetchText(url) {
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: authHeaders()
+  })
+  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`)
+  return response.text()
+}
+
+function githubReleaseApiUrl(releaseUrlPrefix) {
+  const match = releaseUrlPrefix.match(
+    /^https:\/\/github\.com\/([^/]+)\/([^/]+)\/releases\/download\/([^/]+)\/?$/
+  )
+  if (!match) return ''
+  const [, owner, repo, tag] = match
+  return `https://api.github.com/repos/${owner}/${repo}/releases/tags/${tag}`
+}
+
+async function inferVersionFromReleaseAssets(releaseUrlPrefix, artifactBaseName) {
+  const apiUrl = githubReleaseApiUrl(releaseUrlPrefix)
+  if (!apiUrl) {
+    throw new Error(`cannot infer version from non-GitHub release prefix: ${releaseUrlPrefix}`)
+  }
+  const response = await fetch(apiUrl, {
+    method: 'GET',
+    headers: { Accept: 'application/vnd.github+json', ...authHeaders() }
+  })
+  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`)
+  const release = await response.json()
+  const asset = release.assets?.find((item) => {
+    const name = item.name || ''
+    return (
+      name.startsWith(`${artifactBaseName}-`) && (name.endsWith('.zip') || name.endsWith('.gz'))
+    )
+  })
+  if (!asset) throw new Error(`no release asset found for ${artifactBaseName}`)
+  return asset.name
+    .replace(`${artifactBaseName}-`, '')
+    .replace(/\.zip$/, '')
+    .replace(/\.gz$/, '')
+}
+
+async function resolveVersion({
+  explicitVersion,
+  versionUrl,
+  releaseUrlPrefix,
+  artifactBaseName,
+  label
+}) {
+  if (explicitVersion) return explicitVersion
+  try {
+    return (await fetchText(versionUrl)).trim()
+  } catch (error) {
+    console.warn(`[WARN]: failed to fetch ${label} version.txt: ${error.message}`)
+  }
+  const inferred = await inferVersionFromReleaseAssets(releaseUrlPrefix, artifactBaseName)
+  console.log(`[INFO]: inferred ${label} version from release assets: ${inferred}`)
+  return inferred
+}
+
 /* ======= mihomo alpha======= */
 const MIHOMO_ALPHA_VERSION_URL = env(
   'MIHOMO_ALPHA_VERSION_URL',
-  'https://github.com/MetaCubeX/mihomo/releases/download/Prerelease-Alpha/version.txt'
+  'https://github.com/Tinnci/mihomo/releases/download/Prerelease-Alpha/version.txt'
 )
 const MIHOMO_ALPHA_URL_PREFIX = env(
   'MIHOMO_ALPHA_URL_PREFIX',
-  'https://github.com/MetaCubeX/mihomo/releases/download/Prerelease-Alpha'
+  'https://github.com/Tinnci/mihomo/releases/download/Prerelease-Alpha'
 )
 let MIHOMO_ALPHA_VERSION
 
@@ -53,13 +113,13 @@ const MIHOMO_ALPHA_MAP = {
 // Fetch the latest alpha release version from the version.txt file
 async function getLatestAlphaVersion() {
   try {
-    const response = await fetch(MIHOMO_ALPHA_VERSION_URL, {
-      method: 'GET',
-      headers: authHeaders()
+    MIHOMO_ALPHA_VERSION = await resolveVersion({
+      explicitVersion: process.env.MIHOMO_ALPHA_VERSION,
+      versionUrl: MIHOMO_ALPHA_VERSION_URL,
+      releaseUrlPrefix: MIHOMO_ALPHA_URL_PREFIX,
+      artifactBaseName: MIHOMO_ALPHA_MAP[`${platform}-${arch}`],
+      label: 'alpha'
     })
-    if (!response.ok) throw new Error(`${response.status} ${response.statusText}`)
-    let v = await response.text()
-    MIHOMO_ALPHA_VERSION = v.trim() // Trim to remove extra whitespaces
     console.log(`Latest alpha version: ${MIHOMO_ALPHA_VERSION}`)
   } catch (error) {
     console.error('Error fetching latest alpha version:', error.message)
@@ -70,15 +130,25 @@ async function getLatestAlphaVersion() {
 /* ======= mihomo smart ======= */
 const MIHOMO_SMART_VERSION_URL = env(
   'MIHOMO_SMART_VERSION_URL',
-  'https://github.com/vernesong/mihomo/releases/download/Prerelease-Alpha/version.txt'
+  'https://github.com/Tinnci/mihomo/releases/download/Prerelease-Alpha/version.txt'
 )
 const MIHOMO_SMART_URL_PREFIX = env(
   'MIHOMO_SMART_URL_PREFIX',
-  'https://github.com/vernesong/mihomo/releases/download/Prerelease-Alpha'
+  'https://github.com/Tinnci/mihomo/releases/download/Prerelease-Alpha'
 )
 let MIHOMO_SMART_VERSION
 
-const MIHOMO_SMART_MAP = {
+const MIHOMO_SMART_STANDARD_MAP = {
+  'win32-x64': 'mihomo-windows-amd64-compatible',
+  'win32-ia32': 'mihomo-windows-386',
+  'win32-arm64': 'mihomo-windows-arm64',
+  'darwin-x64': 'mihomo-darwin-amd64-compatible',
+  'darwin-arm64': 'mihomo-darwin-arm64',
+  'linux-x64': 'mihomo-linux-amd64-compatible',
+  'linux-arm64': 'mihomo-linux-arm64'
+}
+
+const MIHOMO_SMART_GO120_MAP = {
   'win32-x64': 'mihomo-windows-amd64-v2-go120',
   'win32-ia32': 'mihomo-windows-386-go120',
   'win32-arm64': 'mihomo-windows-arm64',
@@ -88,15 +158,20 @@ const MIHOMO_SMART_MAP = {
   'linux-arm64': 'mihomo-linux-arm64'
 }
 
+const MIHOMO_SMART_MAP =
+  env('MIHOMO_SMART_NAME_FLAVOR', 'standard') === 'go120'
+    ? MIHOMO_SMART_GO120_MAP
+    : MIHOMO_SMART_STANDARD_MAP
+
 async function getLatestSmartVersion() {
   try {
-    const response = await fetch(MIHOMO_SMART_VERSION_URL, {
-      method: 'GET',
-      headers: authHeaders()
+    MIHOMO_SMART_VERSION = await resolveVersion({
+      explicitVersion: process.env.MIHOMO_SMART_VERSION,
+      versionUrl: MIHOMO_SMART_VERSION_URL,
+      releaseUrlPrefix: MIHOMO_SMART_URL_PREFIX,
+      artifactBaseName: MIHOMO_SMART_MAP[`${platform}-${arch}`],
+      label: 'smart'
     })
-    if (!response.ok) throw new Error(`${response.status} ${response.statusText}`)
-    let v = await response.text()
-    MIHOMO_SMART_VERSION = v.trim() // Trim to remove extra whitespaces
     console.log(`Latest smart version: ${MIHOMO_SMART_VERSION}`)
   } catch (error) {
     console.error('Error fetching latest smart version:', error.message)
@@ -107,11 +182,15 @@ async function getLatestSmartVersion() {
 /* ======= mihomo release ======= */
 const MIHOMO_VERSION_URL = env(
   'MIHOMO_VERSION_URL',
-  'https://github.com/MetaCubeX/mihomo/releases/latest/download/version.txt'
+  'https://github.com/Tinnci/mihomo/releases/download/Prerelease-Alpha/version.txt'
 )
 const MIHOMO_URL_PREFIX = env(
   'MIHOMO_URL_PREFIX',
-  'https://github.com/MetaCubeX/mihomo/releases/download'
+  'https://github.com/Tinnci/mihomo/releases/download'
+)
+const MIHOMO_RELEASE_URL_PREFIX = env(
+  'MIHOMO_RELEASE_URL_PREFIX',
+  'https://github.com/Tinnci/mihomo/releases/download/Prerelease-Alpha'
 )
 let MIHOMO_VERSION
 
@@ -128,13 +207,13 @@ const MIHOMO_MAP = {
 // Fetch the latest release version from the version.txt file
 async function getLatestReleaseVersion() {
   try {
-    const response = await fetch(MIHOMO_VERSION_URL, {
-      method: 'GET',
-      headers: authHeaders()
+    MIHOMO_VERSION = await resolveVersion({
+      explicitVersion: process.env.MIHOMO_VERSION,
+      versionUrl: MIHOMO_VERSION_URL,
+      releaseUrlPrefix: MIHOMO_RELEASE_URL_PREFIX || MIHOMO_URL_PREFIX,
+      artifactBaseName: MIHOMO_MAP[`${platform}-${arch}`],
+      label: 'release'
     })
-    if (!response.ok) throw new Error(`${response.status} ${response.statusText}`)
-    let v = await response.text()
-    MIHOMO_VERSION = v.trim() // Trim to remove extra whitespaces
     console.log(`Latest release version: ${MIHOMO_VERSION}`)
   } catch (error) {
     console.error('Error fetching latest release version:', error.message)
@@ -181,7 +260,8 @@ function mihomo() {
   const name = MIHOMO_MAP[`${platform}-${arch}`]
   const isWin = platform === 'win32'
   const urlExt = isWin ? 'zip' : 'gz'
-  const downloadURL = `${MIHOMO_URL_PREFIX}/${MIHOMO_VERSION}/${name}-${MIHOMO_VERSION}.${urlExt}`
+  const releasePrefix = MIHOMO_RELEASE_URL_PREFIX || `${MIHOMO_URL_PREFIX}/${MIHOMO_VERSION}`
+  const downloadURL = `${releasePrefix}/${name}-${MIHOMO_VERSION}.${urlExt}`
   const exeFile = `${name}${isWin ? '.exe' : ''}`
   const zipFile = `${name}-${MIHOMO_VERSION}.${urlExt}`
 

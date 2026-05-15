@@ -1,0 +1,151 @@
+name: Sync Upstream
+
+on:
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+    inputs:
+      upstream_repo:
+        description: Upstream repository URL
+        required: false
+        default: https://github.com/mihomo-party-org/clash-party.git
+      upstream_branch:
+        description: Upstream branch
+        required: false
+        default: smart_core
+      local_branch:
+        description: Local maintenance branch
+        required: false
+        default: smart_core
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+env:
+  UPSTREAM_REPO: ${{ inputs.upstream_repo || vars.UPSTREAM_REPO || 'https://github.com/mihomo-party-org/clash-party.git' }}
+  UPSTREAM_BRANCH: ${{ inputs.upstream_branch || vars.UPSTREAM_BRANCH || 'smart_core' }}
+  LOCAL_BRANCH: ${{ inputs.local_branch || vars.LOCAL_BRANCH || 'smart_core' }}
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout maintenance branch
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ env.LOCAL_BRANCH }}
+          token: ${{ secrets.UPSTREAM_SYNC_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git remote add upstream "$UPSTREAM_REPO"
+
+      - name: Fetch upstream
+        run: git fetch upstream "$UPSTREAM_BRANCH"
+
+      - name: Get sync date
+        id: date
+        run: echo "date=$(date +%Y%m%d)" >> "$GITHUB_OUTPUT"
+
+      - name: Create sync branch
+        run: git checkout -b "sync/upstream-${{ steps.date.outputs.date }}"
+
+      - name: Merge upstream
+        id: merge
+        continue-on-error: true
+        run: |
+          git merge "upstream/$UPSTREAM_BRANCH" --no-edit -m "sync: merge upstream $UPSTREAM_BRANCH (${{ steps.date.outputs.date }})"
+          echo "conflicts=false" >> "$GITHUB_OUTPUT"
+
+      - name: Push sync branch
+        if: steps.merge.outcome == 'success'
+        run: git push origin "sync/upstream-${{ steps.date.outputs.date }}"
+
+      - name: Create PR
+        if: steps.merge.outcome == 'success'
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ secrets.UPSTREAM_SYNC_TOKEN || secrets.GITHUB_TOKEN }}
+          script: |
+            const branch = `sync/upstream-${{ steps.date.outputs.date }}`;
+            const { data: existing } = await github.rest.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              head: `${context.repo.owner}:${branch}`,
+              base: process.env.LOCAL_BRANCH,
+              state: 'open',
+            });
+            if (existing.length > 0) {
+              core.info(`PR already exists: ${existing[0].html_url}`);
+              return;
+            }
+            const { data: pr } = await github.rest.pulls.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `sync: upstream ${process.env.UPSTREAM_BRANCH} (${{ steps.date.outputs.date }})`,
+              head: branch,
+              base: process.env.LOCAL_BRANCH,
+              body: [
+                '## Automated upstream sync',
+                '',
+                `Upstream: ${process.env.UPSTREAM_REPO} (${process.env.UPSTREAM_BRANCH})`,
+                `Base: ${process.env.LOCAL_BRANCH}`,
+                '',
+                '### Required checks',
+                '- [ ] Review Smart Core policy-aware override behavior',
+                '- [ ] Run `bun install --frozen-lockfile`',
+                '- [ ] Run `bun run lint:check`',
+                '- [ ] Run `bun run typecheck`',
+                '- [ ] Build Windows installer before release',
+              ].join('\n'),
+            });
+            core.info(`PR created: ${pr.html_url}`);
+
+      - name: Abort merge after conflicts
+        if: steps.merge.outcome == 'failure'
+        run: git merge --abort
+
+      - name: Open conflict issue
+        if: steps.merge.outcome == 'failure'
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ secrets.UPSTREAM_SYNC_TOKEN || secrets.GITHUB_TOKEN }}
+          script: |
+            const title = `Upstream sync conflict: ${process.env.UPSTREAM_BRANCH} (${{ steps.date.outputs.date }})`;
+            const body = [
+              'Automated upstream sync found conflicts.',
+              '',
+              '```sh',
+              `git fetch upstream ${process.env.UPSTREAM_BRANCH}`,
+              `git checkout ${process.env.LOCAL_BRANCH}`,
+              `git merge upstream/${process.env.UPSTREAM_BRANCH}`,
+              '# resolve conflicts',
+              'bun install --frozen-lockfile',
+              'bun run lint:check',
+              'bun run typecheck',
+              '```',
+            ].join('\n');
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'upstream-sync',
+            });
+            if (!issues.some((issue) => issue.title === title)) {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+                labels: ['upstream-sync'],
+              });
+            }
+
+      - name: Fail on conflict
+        if: steps.merge.outcome == 'failure'
+        run: exit 1

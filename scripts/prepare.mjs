@@ -13,10 +13,31 @@ if (process.argv.slice(2).length !== 0) {
   arch = process.argv.slice(2)[0].replace('--', '')
 }
 
+function env(name, fallback) {
+  return process.env[name] || fallback
+}
+
+function envList(name, fallback) {
+  return env(name, fallback)
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+function authHeaders() {
+  const token = process.env.CORE_DOWNLOAD_TOKEN || process.env.GH_TOKEN || process.env.GITHUB_TOKEN
+  return token ? { Authorization: `Bearer ${token}` } : {}
+}
+
 /* ======= mihomo alpha======= */
-const MIHOMO_ALPHA_VERSION_URL =
+const MIHOMO_ALPHA_VERSION_URL = env(
+  'MIHOMO_ALPHA_VERSION_URL',
   'https://github.com/MetaCubeX/mihomo/releases/download/Prerelease-Alpha/version.txt'
-const MIHOMO_ALPHA_URL_PREFIX = `https://github.com/MetaCubeX/mihomo/releases/download/Prerelease-Alpha`
+)
+const MIHOMO_ALPHA_URL_PREFIX = env(
+  'MIHOMO_ALPHA_URL_PREFIX',
+  'https://github.com/MetaCubeX/mihomo/releases/download/Prerelease-Alpha'
+)
 let MIHOMO_ALPHA_VERSION
 
 const MIHOMO_ALPHA_MAP = {
@@ -33,8 +54,10 @@ const MIHOMO_ALPHA_MAP = {
 async function getLatestAlphaVersion() {
   try {
     const response = await fetch(MIHOMO_ALPHA_VERSION_URL, {
-      method: 'GET'
+      method: 'GET',
+      headers: authHeaders()
     })
+    if (!response.ok) throw new Error(`${response.status} ${response.statusText}`)
     let v = await response.text()
     MIHOMO_ALPHA_VERSION = v.trim() // Trim to remove extra whitespaces
     console.log(`Latest alpha version: ${MIHOMO_ALPHA_VERSION}`)
@@ -45,9 +68,14 @@ async function getLatestAlphaVersion() {
 }
 
 /* ======= mihomo smart ======= */
-const MIHOMO_SMART_VERSION_URL =
+const MIHOMO_SMART_VERSION_URL = env(
+  'MIHOMO_SMART_VERSION_URL',
   'https://github.com/vernesong/mihomo/releases/download/Prerelease-Alpha/version.txt'
-const MIHOMO_SMART_URL_PREFIX = `https://github.com/vernesong/mihomo/releases/download/Prerelease-Alpha`
+)
+const MIHOMO_SMART_URL_PREFIX = env(
+  'MIHOMO_SMART_URL_PREFIX',
+  'https://github.com/vernesong/mihomo/releases/download/Prerelease-Alpha'
+)
 let MIHOMO_SMART_VERSION
 
 const MIHOMO_SMART_MAP = {
@@ -63,8 +91,10 @@ const MIHOMO_SMART_MAP = {
 async function getLatestSmartVersion() {
   try {
     const response = await fetch(MIHOMO_SMART_VERSION_URL, {
-      method: 'GET'
+      method: 'GET',
+      headers: authHeaders()
     })
+    if (!response.ok) throw new Error(`${response.status} ${response.statusText}`)
     let v = await response.text()
     MIHOMO_SMART_VERSION = v.trim() // Trim to remove extra whitespaces
     console.log(`Latest smart version: ${MIHOMO_SMART_VERSION}`)
@@ -75,9 +105,14 @@ async function getLatestSmartVersion() {
 }
 
 /* ======= mihomo release ======= */
-const MIHOMO_VERSION_URL =
+const MIHOMO_VERSION_URL = env(
+  'MIHOMO_VERSION_URL',
   'https://github.com/MetaCubeX/mihomo/releases/latest/download/version.txt'
-const MIHOMO_URL_PREFIX = `https://github.com/MetaCubeX/mihomo/releases/download`
+)
+const MIHOMO_URL_PREFIX = env(
+  'MIHOMO_URL_PREFIX',
+  'https://github.com/MetaCubeX/mihomo/releases/download'
+)
 let MIHOMO_VERSION
 
 const MIHOMO_MAP = {
@@ -94,8 +129,10 @@ const MIHOMO_MAP = {
 async function getLatestReleaseVersion() {
   try {
     const response = await fetch(MIHOMO_VERSION_URL, {
-      method: 'GET'
+      method: 'GET',
+      headers: authHeaders()
     })
+    if (!response.ok) throw new Error(`${response.status} ${response.statusText}`)
     let v = await response.text()
     MIHOMO_VERSION = v.trim() // Trim to remove extra whitespaces
     console.log(`Latest release version: ${MIHOMO_VERSION}`)
@@ -246,7 +283,7 @@ async function resolveSidecar(binInfo) {
     }
   } catch (err) {
     // 需要删除文件
-    fs.rmSync(sidecarPath)
+    fs.rmSync(sidecarPath, { force: true })
     throw err
   } finally {
     fs.rmSync(tempDir, { recursive: true })
@@ -278,8 +315,11 @@ async function resolveResource(binInfo) {
 async function downloadFile(url, path) {
   const response = await fetch(url, {
     method: 'GET',
-    headers: { 'Content-Type': 'application/octet-stream' }
+    headers: { 'Content-Type': 'application/octet-stream', ...authHeaders() }
   })
+  if (!response.ok) {
+    throw new Error(`download failed ${response.status} ${response.statusText}: ${url}`)
+  }
   const buffer = await response.arrayBuffer()
   fs.writeFileSync(path, new Uint8Array(buffer))
 
@@ -318,7 +358,10 @@ const resolveEnableLoopback = () =>
   })
 /* ======= sysproxy-rs ======= */
 const SYSPROXY_RS_VERSION = 'v0.1.0'
-const SYSPROXY_RS_URL_PREFIX = `https://github.com/mihomo-party-org/sysproxy-rs-opti/releases/download/${SYSPROXY_RS_VERSION}`
+const SYSPROXY_RS_URL_PREFIX = env(
+  'SYSPROXY_RS_URL_PREFIX',
+  `https://github.com/mihomo-party-org/sysproxy-rs-opti/releases/download/${env('SYSPROXY_RS_VERSION', SYSPROXY_RS_VERSION)}`
+)
 
 function getSysproxyNodeName() {
   // 检测是否为 musl 系统（与 src/native/sysproxy/index.js 保持一致）
@@ -390,7 +433,7 @@ const resolveMonitor = async () => {
     fs.mkdirSync(tempDir, { recursive: true })
   }
   await downloadFile(
-    `https://github.com/mihomo-party-org/mihomo-party-run/releases/download/monitor/${arch}.zip`,
+    `${env('TRAFFIC_MONITOR_URL_PREFIX', 'https://github.com/mihomo-party-org/mihomo-party-run/releases/download/monitor')}/${arch}.zip`,
     tempZip
   )
   const zip = new AdmZip(tempZip)
@@ -407,18 +450,20 @@ const resolveMonitor = async () => {
 const resolve7zip = () =>
   resolveResource({
     file: '7za.exe',
-    downloadURL: `https://github.com/develar/7zip-bin/raw/master/win/${arch}/7za.exe`
+    downloadURL: `${env('SEVEN_ZIP_URL_PREFIX', 'https://github.com/develar/7zip-bin/raw/master/win')}/${arch}/7za.exe`
   })
 const resolveSubstore = () =>
   resolveResource({
     file: 'sub-store.bundle.cjs',
-    downloadURL:
+    downloadURL: env(
+      'SUBSTORE_BUNDLE_URL',
       'https://github.com/sub-store-org/Sub-Store/releases/latest/download/sub-store.bundle.js'
+    )
   })
 const resolveHelper = () =>
   resolveResource({
     file: 'party.mihomo.helper',
-    downloadURL: `https://github.com/mihomo-party-org/mihomo-party-helper/releases/download/${arch}/party.mihomo.helper`
+    downloadURL: `${env('MIHOMO_HELPER_URL_PREFIX', 'https://github.com/mihomo-party-org/mihomo-party-helper/releases/download')}/${arch}/party.mihomo.helper`
   })
 const resolveSubstoreFrontend = async () => {
   const tempDir = path.join(TEMP_DIR, 'substore-frontend')
@@ -427,7 +472,10 @@ const resolveSubstoreFrontend = async () => {
     fs.mkdirSync(tempDir, { recursive: true })
   }
   await downloadFile(
-    'https://github.com/sub-store-org/Sub-Store-Front-End/releases/latest/download/dist.zip',
+    env(
+      'SUBSTORE_FRONTEND_URL',
+      'https://github.com/sub-store-org/Sub-Store-Front-End/releases/latest/download/dist.zip'
+    ),
     tempZip
   )
   const zip = new AdmZip(tempZip)
@@ -448,7 +496,10 @@ const resolveFont = async () => {
     return
   }
   await downloadFile(
-    'https://github.com/googlefonts/noto-emoji/raw/main/fonts/NotoColorEmoji.ttf',
+    env(
+      'NOTO_COLOR_EMOJI_URL',
+      'https://github.com/googlefonts/noto-emoji/raw/main/fonts/NotoColorEmoji.ttf'
+    ),
     targetPath
   )
 
@@ -521,6 +572,11 @@ const tasks = [
     darwinOnly: true
   }
 ]
+
+const requestedTasks = envList('PREPARE_TASKS', '')
+if (requestedTasks.length > 0) {
+  tasks.splice(0, tasks.length, ...tasks.filter((task) => requestedTasks.includes(task.name)))
+}
 
 async function runTask() {
   const task = tasks.shift()

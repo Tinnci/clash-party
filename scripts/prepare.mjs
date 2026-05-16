@@ -4,6 +4,7 @@ import path from 'path'
 import zlib from 'zlib'
 import { extract } from 'tar'
 import { execSync } from 'child_process'
+import { pipeline } from 'stream/promises'
 
 const cwd = process.cwd()
 const TEMP_DIR = path.join(cwd, 'node_modules/.temp')
@@ -24,17 +25,51 @@ function envList(name, fallback) {
     .filter(Boolean)
 }
 
+function envNumber(name, fallback) {
+  const value = Number(process.env[name])
+  return Number.isFinite(value) && value > 0 ? value : fallback
+}
+
 function authHeaders() {
   const token = process.env.CORE_DOWNLOAD_TOKEN || process.env.GH_TOKEN || process.env.GITHUB_TOKEN
   return token ? { Authorization: `Bearer ${token}` } : {}
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function replaceFile(sourcePath, targetPath) {
+  fs.rmSync(targetPath, { force: true })
+  fs.renameSync(sourcePath, targetPath)
+}
+
+function replaceDir(sourcePath, targetPath) {
+  fs.rmSync(targetPath, { recursive: true, force: true })
+  fs.renameSync(sourcePath, targetPath)
+}
+
+async function fetchWithRetry(url, options = {}, retries = envNumber('PREPARE_FETCH_RETRIES', 3)) {
+  let lastError
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const response = await fetch(url, options)
+      if (response.ok) return response
+      lastError = new Error(`${response.status} ${response.statusText}`)
+      if (response.status < 500 && response.status !== 429) break
+    } catch (error) {
+      lastError = error
+    }
+    if (attempt < retries) await sleep(Math.min(1000 * 2 ** (attempt - 1), 8000))
+  }
+  throw lastError
+}
+
 async function fetchText(url) {
-  const response = await fetch(url, {
+  const response = await fetchWithRetry(url, {
     method: 'GET',
     headers: authHeaders()
   })
-  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`)
   return response.text()
 }
 
@@ -52,16 +87,16 @@ async function inferVersionFromReleaseAssets(releaseUrlPrefix, artifactBaseName)
   if (!apiUrl) {
     throw new Error(`cannot infer version from non-GitHub release prefix: ${releaseUrlPrefix}`)
   }
-  const response = await fetch(apiUrl, {
+  const response = await fetchWithRetry(apiUrl, {
     method: 'GET',
     headers: { Accept: 'application/vnd.github+json', ...authHeaders() }
   })
-  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`)
   const release = await response.json()
   const asset = release.assets?.find((item) => {
     const name = item.name || ''
     return (
-      name.startsWith(`${artifactBaseName}-`) && (name.endsWith('.zip') || name.endsWith('.gz'))
+      name.startsWith(`${artifactBaseName}-`) &&
+      (name.endsWith('.zip') || name.endsWith('.gz') || name.endsWith('.tgz'))
     )
   })
   if (!asset) throw new Error(`no release asset found for ${artifactBaseName}`)
@@ -69,6 +104,7 @@ async function inferVersionFromReleaseAssets(releaseUrlPrefix, artifactBaseName)
     .replace(`${artifactBaseName}-`, '')
     .replace(/\.zip$/, '')
     .replace(/\.gz$/, '')
+    .replace(/\.tgz$/, '')
 }
 
 async function resolveVersion({
@@ -124,16 +160,25 @@ function exactReleasePrefix(channelEnvPrefix) {
   )
 }
 
+function trimTrailingSlash(value) {
+  return value.replace(/\/+$/, '')
+}
+
+function appendVersionToLegacyPrefix(prefix, version) {
+  const cleanPrefix = trimTrailingSlash(prefix)
+  if (/\/releases\/download\/[^/]+$/i.test(cleanPrefix)) return cleanPrefix
+  if (/\/releases\/download$/i.test(cleanPrefix)) return `${cleanPrefix}/${version}`
+  return cleanPrefix
+}
+
 function downloadReleasePrefix(channel) {
   const exactPrefix = process.env[`${channel.envPrefix}_RELEASE_URL_PREFIX`]
-  if (exactPrefix) return exactPrefix
+  if (exactPrefix) return trimTrailingSlash(exactPrefix)
 
   const legacyPrefix = process.env[`${channel.envPrefix}_URL_PREFIX`]
-  if (channel.envPrefix === 'MIHOMO' && legacyPrefix) {
-    return `${legacyPrefix}/${channel.version}`
-  }
+  if (legacyPrefix) return appendVersionToLegacyPrefix(legacyPrefix, channel.version)
 
-  return channel.releasePrefix
+  return trimTrailingSlash(channel.releasePrefix)
 }
 
 function coreMap(channelEnvPrefix) {
@@ -167,7 +212,7 @@ const CORE_CHANNELS = {
       return env('MIHOMO_ALPHA_VERSION_URL', OWN_CORE_VERSION_URL)
     },
     get releasePrefix() {
-      return env('MIHOMO_ALPHA_URL_PREFIX', OWN_CORE_RELEASE_PREFIX)
+      return exactReleasePrefix('MIHOMO_ALPHA')
     },
     get artifactMap() {
       return coreMap('MIHOMO_ALPHA')
@@ -182,7 +227,7 @@ const CORE_CHANNELS = {
       return env('MIHOMO_SMART_VERSION_URL', OWN_CORE_VERSION_URL)
     },
     get releasePrefix() {
-      return env('MIHOMO_SMART_URL_PREFIX', OWN_CORE_RELEASE_PREFIX)
+      return exactReleasePrefix('MIHOMO_SMART')
     },
     get artifactMap() {
       return coreMap('MIHOMO_SMART')
@@ -203,8 +248,7 @@ async function resolveCoreVersion(channel) {
     console.log(`[INFO]: ${channel.label} source: ${downloadReleasePrefix(channel)}`)
     console.log(`[INFO]: latest ${channel.label} version: ${channel.version}`)
   } catch (error) {
-    console.error(`Error fetching ${channel.label} version:`, error.message)
-    process.exit(1)
+    throw new Error(`Error fetching ${channel.label} version: ${error.message}`)
   }
 }
 
@@ -244,19 +288,17 @@ async function resolveSidecar(binInfo) {
 
   const sidecarDir = path.join(cwd, 'extra', 'sidecar')
   const sidecarPath = path.join(sidecarDir, targetFile)
+  const nextSidecarPath = path.join(sidecarDir, `${targetFile}.download`)
 
   fs.mkdirSync(sidecarDir, { recursive: true })
-  if (fs.existsSync(sidecarPath)) {
-    fs.rmSync(sidecarPath)
-  }
   const tempDir = path.join(TEMP_DIR, name)
   const tempZip = path.join(tempDir, zipFile)
-  const tempExe = path.join(tempDir, exeFile)
 
+  fs.rmSync(tempDir, { recursive: true, force: true })
   fs.mkdirSync(tempDir, { recursive: true })
   try {
     if (!fs.existsSync(tempZip)) {
-      await downloadFile(downloadURL, tempZip)
+      await downloadFile(downloadURL, tempZip, { atomic: true })
     }
 
     if (zipFile.endsWith('.zip')) {
@@ -265,7 +307,11 @@ async function resolveSidecar(binInfo) {
         console.log(`[DEBUG]: "${name}" entry name`, entry.entryName)
       })
       zip.extractAllTo(tempDir, true)
-      fs.renameSync(tempExe, sidecarPath)
+      const extractedExe = findExtractedFile(tempDir, exeFile)
+      if (!extractedExe) {
+        throw new Error(`expected executable "${exeFile}" not found in ${tempDir}`)
+      }
+      fs.renameSync(extractedExe, nextSidecarPath)
       console.log(`[INFO]: "${name}" unzip finished`)
     } else if (zipFile.endsWith('.tgz')) {
       // tgz
@@ -276,12 +322,11 @@ async function resolveSidecar(binInfo) {
       })
       const files = fs.readdirSync(tempDir)
       console.log(`[DEBUG]: "${name}" files in tempDir:`, files)
-      const extractedFile = files.find((file) => file.startsWith('虚空终端-'))
-      if (extractedFile) {
-        const extractedFilePath = path.join(tempDir, extractedFile)
-        fs.renameSync(extractedFilePath, sidecarPath)
-        console.log(`[INFO]: "${name}" file renamed to "${sidecarPath}"`)
-        execSync(`chmod 755 ${sidecarPath}`)
+      const extractedFilePath = findExtractedFile(tempDir, exeFile)
+      if (extractedFilePath) {
+        fs.renameSync(extractedFilePath, nextSidecarPath)
+        console.log(`[INFO]: "${name}" file renamed to "${nextSidecarPath}"`)
+        fs.chmodSync(nextSidecarPath, 0o755)
         console.log(`[INFO]: "${name}" chmod binary finished`)
       } else {
         throw new Error(`Expected file not found in ${tempDir}`)
@@ -289,31 +334,35 @@ async function resolveSidecar(binInfo) {
     } else {
       // gz
       const readStream = fs.createReadStream(tempZip)
-      const writeStream = fs.createWriteStream(sidecarPath)
-      await new Promise((resolve, reject) => {
-        const onError = (error) => {
-          console.error(`[ERROR]: "${name}" gz failed:`, error.message)
-          reject(error)
-        }
-        readStream
-          .pipe(zlib.createGunzip().on('error', onError))
-          .pipe(writeStream)
-          .on('finish', () => {
-            console.log(`[INFO]: "${name}" gunzip finished`)
-            execSync(`chmod 755 ${sidecarPath}`)
-            console.log(`[INFO]: "${name}" chmod binary finished`)
-            resolve()
-          })
-          .on('error', onError)
-      })
+      const writeStream = fs.createWriteStream(nextSidecarPath)
+      await pipeline(readStream, zlib.createGunzip(), writeStream)
+      console.log(`[INFO]: "${name}" gunzip finished`)
+      fs.chmodSync(nextSidecarPath, 0o755)
+      console.log(`[INFO]: "${name}" chmod binary finished`)
     }
+
+    replaceFile(nextSidecarPath, sidecarPath)
+    console.log(`[INFO]: "${name}" sidecar ready: ${sidecarPath}`)
   } catch (err) {
-    // 需要删除文件
-    fs.rmSync(sidecarPath, { force: true })
+    fs.rmSync(nextSidecarPath, { force: true })
     throw err
   } finally {
-    fs.rmSync(tempDir, { recursive: true })
+    fs.rmSync(tempDir, { recursive: true, force: true })
   }
+}
+
+function findExtractedFile(dir, expectedName) {
+  const entries = fs.readdirSync(dir, { withFileTypes: true })
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name)
+    if (entry.isDirectory()) {
+      const found = findExtractedFile(fullPath, expectedName)
+      if (found) return found
+    } else if (entry.name === expectedName || entry.name.replace(/\.exe$/, '') === expectedName) {
+      return fullPath
+    }
+  }
+  return ''
 }
 
 /**
@@ -325,12 +374,8 @@ async function resolveResource(binInfo) {
   const resDir = path.join(cwd, 'extra', 'files')
   const targetPath = path.join(resDir, file)
 
-  if (fs.existsSync(targetPath)) {
-    fs.rmSync(targetPath)
-  }
-
   fs.mkdirSync(resDir, { recursive: true })
-  await downloadFile(downloadURL, targetPath)
+  await downloadFile(downloadURL, targetPath, { atomic: true })
 
   console.log(`[INFO]: ${file} finished`)
 }
@@ -338,16 +383,17 @@ async function resolveResource(binInfo) {
 /**
  * download file and save to `path`
  */
-async function downloadFile(url, path) {
-  const response = await fetch(url, {
+async function downloadFile(url, filePath, options = {}) {
+  const response = await fetchWithRetry(url, {
     method: 'GET',
     headers: { 'Content-Type': 'application/octet-stream', ...authHeaders() }
   })
-  if (!response.ok) {
-    throw new Error(`download failed ${response.status} ${response.statusText}: ${url}`)
-  }
-  const buffer = await response.arrayBuffer()
-  fs.writeFileSync(path, new Uint8Array(buffer))
+  const targetPath = options.atomic ? `${filePath}.download` : filePath
+  fs.rmSync(targetPath, { force: true })
+
+  if (!response.body) throw new Error(`download failed with empty body: ${url}`)
+  await pipeline(response.body, fs.createWriteStream(targetPath))
+  if (options.atomic) replaceFile(targetPath, filePath)
 
   console.log(`[INFO]: download finished "${url}"`)
 }
@@ -444,11 +490,7 @@ const resolveSysproxy = async () => {
     }
   }
 
-  if (fs.existsSync(targetPath)) {
-    fs.rmSync(targetPath)
-  }
-
-  await downloadFile(`${SYSPROXY_RS_URL_PREFIX}/${nodeName}`, targetPath)
+  await downloadFile(`${SYSPROXY_RS_URL_PREFIX}/${nodeName}`, targetPath, { atomic: true })
   console.log(`[INFO]: ${nodeName} finished`)
 }
 
@@ -458,19 +500,27 @@ const resolveMonitor = async () => {
   if (!fs.existsSync(tempDir)) {
     fs.mkdirSync(tempDir, { recursive: true })
   }
-  await downloadFile(
-    `${env('TRAFFIC_MONITOR_URL_PREFIX', 'https://github.com/mihomo-party-org/mihomo-party-run/releases/download/monitor')}/${arch}.zip`,
-    tempZip
-  )
-  const zip = new AdmZip(tempZip)
   const resDir = path.join(cwd, 'extra', 'files')
   const targetPath = path.join(resDir, 'TrafficMonitor')
-  if (fs.existsSync(targetPath)) {
-    fs.rmSync(targetPath, { recursive: true })
+  const nextTargetPath = `${targetPath}.download`
+  try {
+    await downloadFile(
+      `${env('TRAFFIC_MONITOR_URL_PREFIX', 'https://github.com/mihomo-party-org/mihomo-party-run/releases/download/monitor')}/${arch}.zip`,
+      tempZip,
+      { atomic: true }
+    )
+    const zip = new AdmZip(tempZip)
+    fs.mkdirSync(resDir, { recursive: true })
+    fs.rmSync(nextTargetPath, { recursive: true, force: true })
+    zip.extractAllTo(nextTargetPath, true)
+    replaceDir(nextTargetPath, targetPath)
+    console.log(`[INFO]: TrafficMonitor finished`)
+  } catch (error) {
+    fs.rmSync(nextTargetPath, { recursive: true, force: true })
+    throw error
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true })
   }
-  zip.extractAllTo(targetPath, true)
-
-  console.log(`[INFO]: TrafficMonitor finished`)
 }
 
 const resolve7zip = () =>
@@ -497,23 +547,31 @@ const resolveSubstoreFrontend = async () => {
   if (!fs.existsSync(tempDir)) {
     fs.mkdirSync(tempDir, { recursive: true })
   }
-  await downloadFile(
-    env(
-      'SUBSTORE_FRONTEND_URL',
-      'https://github.com/sub-store-org/Sub-Store-Front-End/releases/latest/download/dist.zip'
-    ),
-    tempZip
-  )
-  const zip = new AdmZip(tempZip)
   const resDir = path.join(cwd, 'extra', 'files')
   const targetPath = path.join(resDir, 'sub-store-frontend')
-  if (fs.existsSync(targetPath)) {
-    fs.rmSync(targetPath, { recursive: true })
+  const nextTargetPath = `${targetPath}.download`
+  try {
+    await downloadFile(
+      env(
+        'SUBSTORE_FRONTEND_URL',
+        'https://github.com/sub-store-org/Sub-Store-Front-End/releases/latest/download/dist.zip'
+      ),
+      tempZip,
+      { atomic: true }
+    )
+    const zip = new AdmZip(tempZip)
+    fs.mkdirSync(resDir, { recursive: true })
+    fs.rmSync(nextTargetPath, { recursive: true, force: true })
+    zip.extractAllTo(resDir, true)
+    fs.renameSync(path.join(resDir, 'dist'), nextTargetPath)
+    replaceDir(nextTargetPath, targetPath)
+    console.log(`[INFO]: sub-store-frontend finished`)
+  } catch (error) {
+    fs.rmSync(nextTargetPath, { recursive: true, force: true })
+    throw error
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true })
   }
-  zip.extractAllTo(resDir, true)
-  fs.renameSync(path.join(resDir, 'dist'), targetPath)
-
-  console.log(`[INFO]: sub-store-frontend finished`)
 }
 const resolveFont = async () => {
   const targetPath = path.join(cwd, 'src', 'renderer', 'src', 'assets', 'NotoColorEmoji.ttf')
@@ -526,7 +584,8 @@ const resolveFont = async () => {
       'NOTO_COLOR_EMOJI_URL',
       'https://github.com/googlefonts/noto-emoji/raw/main/fonts/NotoColorEmoji.ttf'
     ),
-    targetPath
+    targetPath,
+    { atomic: true }
   )
 
   console.log(`[INFO]: NotoColorEmoji.ttf finished`)
@@ -610,35 +669,75 @@ const tasks = [
 
 const requestedTasks = envList('PREPARE_TASKS', '')
 if (requestedTasks.length > 0) {
-  tasks.splice(0, tasks.length, ...tasks.filter((task) => requestedTasks.includes(task.name)))
+  const requestedTaskSet = new Set(requestedTasks)
+  const unknownTasks = requestedTasks.filter((name) => !tasks.some((task) => task.name === name))
+  if (unknownTasks.length > 0) {
+    throw new Error(`unknown PREPARE_TASKS: ${unknownTasks.join(', ')}`)
+  }
+  tasks.splice(0, tasks.length, ...tasks.filter((task) => requestedTaskSet.has(task.name)))
 }
 
-async function runTask() {
-  const task = tasks.shift()
-  if (!task) return
-  if (task.winOnly && platform !== 'win32') return runTask()
-  if (task.linuxOnly && platform !== 'linux') return runTask()
-  if (task.unixOnly && platform === 'win32') return runTask()
-  if (task.darwinOnly && platform !== 'darwin') return runTask()
+function shouldSkipTask(task) {
+  if (task.winOnly && platform !== 'win32') return true
+  if (task.linuxOnly && platform !== 'linux') return true
+  if (task.unixOnly && platform === 'win32') return true
+  if (task.darwinOnly && platform !== 'darwin') return true
+  return false
+}
+
+async function runTask(task) {
+  if (shouldSkipTask(task)) {
+    console.log(`[INFO]: task::${task.name} skipped for ${platform}-${arch}`)
+    return
+  }
 
   for (let i = 0; i < task.retry; i++) {
     try {
+      console.log(`[INFO]: task::${task.name} started (${i + 1}/${task.retry})`)
       await task.func()
-      break
+      console.log(`[INFO]: task::${task.name} finished`)
+      return
     } catch (err) {
-      console.error(`[ERROR]: task::${task.name} try ${i} ==`, err.message)
+      console.error(`[ERROR]: task::${task.name} try ${i + 1} ==`, err.message)
       if (i === task.retry - 1) {
         if (task.optional) {
           console.log(`[WARN]: Optional task::${task.name} failed, skipping...`)
-          break
+          return
         } else {
           throw err
         }
       }
+      await sleep(Math.min(1000 * 2 ** i, 10000))
     }
   }
-  return runTask()
 }
 
-runTask()
-runTask()
+async function runTasks() {
+  const concurrency = envNumber('PREPARE_CONCURRENCY', 2)
+  const queue = [...tasks]
+  const failedTasks = []
+
+  async function worker() {
+    while (queue.length > 0) {
+      const task = queue.shift()
+      try {
+        await runTask(task)
+      } catch (error) {
+        failedTasks.push({ task, error })
+      }
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, Math.max(queue.length, 1)) }, () => worker())
+  )
+
+  if (failedTasks.length > 0) {
+    for (const { task, error } of failedTasks) {
+      console.error(`[ERROR]: task::${task.name} failed permanently:`, error.message)
+    }
+    throw new Error(`${failedTasks.length} prepare task(s) failed`)
+  }
+}
+
+await runTasks()

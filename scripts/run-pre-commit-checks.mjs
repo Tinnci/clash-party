@@ -2,6 +2,23 @@ import { spawnSync } from 'node:child_process'
 
 const isWin = process.platform === 'win32'
 const windowsShell = process.env.ComSpec || process.env.COMSPEC || 'cmd.exe'
+const prettierExtensions = new Set([
+  '.js',
+  '.jsx',
+  '.cjs',
+  '.mjs',
+  '.ts',
+  '.tsx',
+  '.cts',
+  '.mts',
+  '.json',
+  '.css',
+  '.scss',
+  '.html',
+  '.md',
+  '.yaml',
+  '.yml'
+])
 
 const runners = [
   {
@@ -15,7 +32,8 @@ const runners = [
 const checks = [
   {
     name: 'Format Check',
-    command: 'run format:check',
+    command: 'prettier --check',
+    stagedOnly: true,
     help: 'Formatting issues were reported above. Review the listed files and fix them before committing again.'
   },
   {
@@ -44,6 +62,25 @@ function spawnCommand(command, { stdio = 'inherit' } = {}) {
   })
 }
 
+function shellQuote(value) {
+  if (isWin) return `"${value.replace(/"/g, '\\"')}"`
+  return `'${value.replace(/'/g, "'\\''")}'`
+}
+
+function stagedPrettierFiles() {
+  const result = spawnCommand('git diff --cached --name-only --diff-filter=ACMR', {
+    stdio: 'pipe'
+  })
+  if (result.error || result.status !== 0) return []
+
+  return result.stdout
+    .toString()
+    .split(/\r?\n/)
+    .map((file) => file.trim())
+    .filter(Boolean)
+    .filter((file) => prettierExtensions.has(file.slice(file.lastIndexOf('.'))))
+}
+
 function commandExists(command) {
   const probe = isWin ? `where ${command}` : `command -v ${command}`
   const result = spawnCommand(probe, { stdio: 'ignore' })
@@ -67,7 +104,16 @@ printDivider()
 
 for (const check of checks) {
   console.log(`\n[pre-commit] ${check.name}`)
-  const result = spawnCommand(runner.run(check.command))
+  let command = runner.run(check.command)
+  if (check.stagedOnly) {
+    const files = stagedPrettierFiles()
+    if (files.length === 0) {
+      console.log(`[pre-commit] ${check.name} skipped; no staged files require prettier.`)
+      continue
+    }
+    command = `${command} ${files.map(shellQuote).join(' ')}`
+  }
+  const result = spawnCommand(command)
 
   if (result.error) {
     console.error(`\n[pre-commit] Failed to run "${check.command}".`)

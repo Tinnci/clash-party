@@ -16,7 +16,7 @@ on:
       local_branch:
         description: Local maintenance branch
         required: false
-        default: smart_core
+        default: smart_core_upstream
 
 permissions:
   contents: write
@@ -26,7 +26,7 @@ permissions:
 env:
   UPSTREAM_REPO: ${{ inputs.upstream_repo || vars.UPSTREAM_REPO || 'https://github.com/mihomo-party-org/clash-party.git' }}
   UPSTREAM_BRANCH: ${{ inputs.upstream_branch || vars.UPSTREAM_BRANCH || 'smart_core' }}
-  LOCAL_BRANCH: ${{ inputs.local_branch || vars.LOCAL_BRANCH || 'smart_core' }}
+  LOCAL_BRANCH: ${{ inputs.local_branch || vars.LOCAL_BRANCH || 'smart_core_upstream' }}
 
 jobs:
   sync:

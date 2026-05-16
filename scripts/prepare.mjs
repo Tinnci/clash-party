@@ -89,18 +89,15 @@ async function resolveVersion({
   return inferred
 }
 
-/* ======= mihomo alpha======= */
-const MIHOMO_ALPHA_VERSION_URL = env(
-  'MIHOMO_ALPHA_VERSION_URL',
-  'https://github.com/Tinnci/mihomo/releases/download/Prerelease-Alpha/version.txt'
+/* ======= mihomo cores ======= */
+const OWN_CORE_RELEASE_TAG = env('OWN_CORE_RELEASE_TAG', 'Prerelease-Alpha')
+const OWN_CORE_RELEASE_PREFIX = env(
+  'OWN_CORE_RELEASE_PREFIX',
+  `https://github.com/Tinnci/mihomo/releases/download/${OWN_CORE_RELEASE_TAG}`
 )
-const MIHOMO_ALPHA_URL_PREFIX = env(
-  'MIHOMO_ALPHA_URL_PREFIX',
-  'https://github.com/Tinnci/mihomo/releases/download/Prerelease-Alpha'
-)
-let MIHOMO_ALPHA_VERSION
+const OWN_CORE_VERSION_URL = env('OWN_CORE_VERSION_URL', `${OWN_CORE_RELEASE_PREFIX}/version.txt`)
 
-const MIHOMO_ALPHA_MAP = {
+const STANDARD_CORE_MAP = {
   'win32-x64': 'mihomo-windows-amd64-compatible',
   'win32-ia32': 'mihomo-windows-386',
   'win32-arm64': 'mihomo-windows-arm64',
@@ -110,45 +107,7 @@ const MIHOMO_ALPHA_MAP = {
   'linux-arm64': 'mihomo-linux-arm64'
 }
 
-// Fetch the latest alpha release version from the version.txt file
-async function getLatestAlphaVersion() {
-  try {
-    MIHOMO_ALPHA_VERSION = await resolveVersion({
-      explicitVersion: process.env.MIHOMO_ALPHA_VERSION,
-      versionUrl: MIHOMO_ALPHA_VERSION_URL,
-      releaseUrlPrefix: MIHOMO_ALPHA_URL_PREFIX,
-      artifactBaseName: MIHOMO_ALPHA_MAP[`${platform}-${arch}`],
-      label: 'alpha'
-    })
-    console.log(`Latest alpha version: ${MIHOMO_ALPHA_VERSION}`)
-  } catch (error) {
-    console.error('Error fetching latest alpha version:', error.message)
-    process.exit(1)
-  }
-}
-
-/* ======= mihomo smart ======= */
-const MIHOMO_SMART_VERSION_URL = env(
-  'MIHOMO_SMART_VERSION_URL',
-  'https://github.com/Tinnci/mihomo/releases/download/Prerelease-Alpha/version.txt'
-)
-const MIHOMO_SMART_URL_PREFIX = env(
-  'MIHOMO_SMART_URL_PREFIX',
-  'https://github.com/Tinnci/mihomo/releases/download/Prerelease-Alpha'
-)
-let MIHOMO_SMART_VERSION
-
-const MIHOMO_SMART_STANDARD_MAP = {
-  'win32-x64': 'mihomo-windows-amd64-compatible',
-  'win32-ia32': 'mihomo-windows-386',
-  'win32-arm64': 'mihomo-windows-arm64',
-  'darwin-x64': 'mihomo-darwin-amd64-compatible',
-  'darwin-arm64': 'mihomo-darwin-arm64',
-  'linux-x64': 'mihomo-linux-amd64-compatible',
-  'linux-arm64': 'mihomo-linux-arm64'
-}
-
-const MIHOMO_SMART_GO120_MAP = {
+const GO120_CORE_MAP = {
   'win32-x64': 'mihomo-windows-amd64-v2-go120',
   'win32-ia32': 'mihomo-windows-386-go120',
   'win32-arm64': 'mihomo-windows-arm64',
@@ -158,65 +117,93 @@ const MIHOMO_SMART_GO120_MAP = {
   'linux-arm64': 'mihomo-linux-arm64'
 }
 
-const MIHOMO_SMART_MAP =
-  env('MIHOMO_SMART_NAME_FLAVOR', 'standard') === 'go120'
-    ? MIHOMO_SMART_GO120_MAP
-    : MIHOMO_SMART_STANDARD_MAP
+function exactReleasePrefix(channelEnvPrefix) {
+  return env(
+    `${channelEnvPrefix}_RELEASE_URL_PREFIX`,
+    env(`${channelEnvPrefix}_URL_PREFIX`, OWN_CORE_RELEASE_PREFIX)
+  )
+}
 
-async function getLatestSmartVersion() {
-  try {
-    MIHOMO_SMART_VERSION = await resolveVersion({
-      explicitVersion: process.env.MIHOMO_SMART_VERSION,
-      versionUrl: MIHOMO_SMART_VERSION_URL,
-      releaseUrlPrefix: MIHOMO_SMART_URL_PREFIX,
-      artifactBaseName: MIHOMO_SMART_MAP[`${platform}-${arch}`],
-      label: 'smart'
-    })
-    console.log(`Latest smart version: ${MIHOMO_SMART_VERSION}`)
-  } catch (error) {
-    console.error('Error fetching latest smart version:', error.message)
-    process.exit(1)
+function downloadReleasePrefix(channel) {
+  const exactPrefix = process.env[`${channel.envPrefix}_RELEASE_URL_PREFIX`]
+  if (exactPrefix) return exactPrefix
+
+  const legacyPrefix = process.env[`${channel.envPrefix}_URL_PREFIX`]
+  if (channel.envPrefix === 'MIHOMO' && legacyPrefix) {
+    return `${legacyPrefix}/${channel.version}`
+  }
+
+  return channel.releasePrefix
+}
+
+function coreMap(channelEnvPrefix) {
+  return env(`${channelEnvPrefix}_NAME_FLAVOR`, 'standard') === 'go120'
+    ? GO120_CORE_MAP
+    : STANDARD_CORE_MAP
+}
+
+const CORE_CHANNELS = {
+  mihomo: {
+    label: 'mihomo',
+    envPrefix: 'MIHOMO',
+    targetName: 'mihomo',
+    version: '',
+    get versionUrl() {
+      return env('MIHOMO_VERSION_URL', OWN_CORE_VERSION_URL)
+    },
+    get releasePrefix() {
+      return exactReleasePrefix('MIHOMO')
+    },
+    get artifactMap() {
+      return coreMap('MIHOMO')
+    }
+  },
+  alpha: {
+    label: 'mihomo-alpha',
+    envPrefix: 'MIHOMO_ALPHA',
+    targetName: 'mihomo-alpha',
+    version: '',
+    get versionUrl() {
+      return env('MIHOMO_ALPHA_VERSION_URL', OWN_CORE_VERSION_URL)
+    },
+    get releasePrefix() {
+      return env('MIHOMO_ALPHA_URL_PREFIX', OWN_CORE_RELEASE_PREFIX)
+    },
+    get artifactMap() {
+      return coreMap('MIHOMO_ALPHA')
+    }
+  },
+  smart: {
+    label: 'mihomo-smart',
+    envPrefix: 'MIHOMO_SMART',
+    targetName: 'mihomo-smart',
+    version: '',
+    get versionUrl() {
+      return env('MIHOMO_SMART_VERSION_URL', OWN_CORE_VERSION_URL)
+    },
+    get releasePrefix() {
+      return env('MIHOMO_SMART_URL_PREFIX', OWN_CORE_RELEASE_PREFIX)
+    },
+    get artifactMap() {
+      return coreMap('MIHOMO_SMART')
+    }
   }
 }
 
-/* ======= mihomo release ======= */
-const MIHOMO_VERSION_URL = env(
-  'MIHOMO_VERSION_URL',
-  'https://github.com/Tinnci/mihomo/releases/download/Prerelease-Alpha/version.txt'
-)
-const MIHOMO_URL_PREFIX = env(
-  'MIHOMO_URL_PREFIX',
-  'https://github.com/Tinnci/mihomo/releases/download'
-)
-const MIHOMO_RELEASE_URL_PREFIX = env(
-  'MIHOMO_RELEASE_URL_PREFIX',
-  'https://github.com/Tinnci/mihomo/releases/download/Prerelease-Alpha'
-)
-let MIHOMO_VERSION
-
-const MIHOMO_MAP = {
-  'win32-x64': 'mihomo-windows-amd64-compatible',
-  'win32-ia32': 'mihomo-windows-386',
-  'win32-arm64': 'mihomo-windows-arm64',
-  'darwin-x64': 'mihomo-darwin-amd64-compatible',
-  'darwin-arm64': 'mihomo-darwin-arm64',
-  'linux-x64': 'mihomo-linux-amd64-compatible',
-  'linux-arm64': 'mihomo-linux-arm64'
-}
-
-// Fetch the latest release version from the version.txt file
-async function getLatestReleaseVersion() {
+async function resolveCoreVersion(channel) {
+  const artifactBaseName = channel.artifactMap[`${platform}-${arch}`]
   try {
-    MIHOMO_VERSION = await resolveVersion({
-      explicitVersion: process.env.MIHOMO_VERSION,
-      versionUrl: MIHOMO_VERSION_URL,
-      releaseUrlPrefix: MIHOMO_RELEASE_URL_PREFIX || MIHOMO_URL_PREFIX,
-      artifactBaseName: MIHOMO_MAP[`${platform}-${arch}`],
-      label: 'release'
+    channel.version = await resolveVersion({
+      explicitVersion: process.env[`${channel.envPrefix}_VERSION`] || process.env.OWN_CORE_VERSION,
+      versionUrl: channel.versionUrl,
+      releaseUrlPrefix: channel.releasePrefix,
+      artifactBaseName,
+      label: channel.label
     })
-    console.log(`Latest release version: ${MIHOMO_VERSION}`)
+    console.log(`[INFO]: ${channel.label} source: ${downloadReleasePrefix(channel)}`)
+    console.log(`[INFO]: latest ${channel.label} version: ${channel.version}`)
   } catch (error) {
-    console.error('Error fetching latest release version:', error.message)
+    console.error(`Error fetching ${channel.label} version:`, error.message)
     process.exit(1)
   }
 }
@@ -224,67 +211,26 @@ async function getLatestReleaseVersion() {
 /*
  * check available
  */
-if (!MIHOMO_MAP[`${platform}-${arch}`]) {
-  throw new Error(`unsupported platform "${platform}-${arch}"`)
-}
-
-if (!MIHOMO_ALPHA_MAP[`${platform}-${arch}`]) {
-  throw new Error(`unsupported platform "${platform}-${arch}"`)
-}
-
-if (!MIHOMO_SMART_MAP[`${platform}-${arch}`]) {
-  throw new Error(`unsupported platform "${platform}-${arch}"`)
+for (const channel of Object.values(CORE_CHANNELS)) {
+  if (!channel.artifactMap[`${platform}-${arch}`]) {
+    throw new Error(`unsupported platform "${platform}-${arch}" for ${channel.label}`)
+  }
 }
 
 /**
  * core info
  */
-function MihomoAlpha() {
-  const name = MIHOMO_ALPHA_MAP[`${platform}-${arch}`]
+function coreSidecar(channel) {
+  const name = channel.artifactMap[`${platform}-${arch}`]
   const isWin = platform === 'win32'
   const urlExt = isWin ? 'zip' : 'gz'
-  const downloadURL = `${MIHOMO_ALPHA_URL_PREFIX}/${name}-${MIHOMO_ALPHA_VERSION}.${urlExt}`
+  const downloadURL = `${downloadReleasePrefix(channel)}/${name}-${channel.version}.${urlExt}`
   const exeFile = `${name}${isWin ? '.exe' : ''}`
-  const zipFile = `${name}-${MIHOMO_ALPHA_VERSION}.${urlExt}`
+  const zipFile = `${name}-${channel.version}.${urlExt}`
 
   return {
-    name: 'mihomo-alpha',
-    targetFile: `mihomo-alpha${isWin ? '.exe' : ''}`,
-    exeFile,
-    zipFile,
-    downloadURL
-  }
-}
-
-function mihomo() {
-  const name = MIHOMO_MAP[`${platform}-${arch}`]
-  const isWin = platform === 'win32'
-  const urlExt = isWin ? 'zip' : 'gz'
-  const releasePrefix = MIHOMO_RELEASE_URL_PREFIX || `${MIHOMO_URL_PREFIX}/${MIHOMO_VERSION}`
-  const downloadURL = `${releasePrefix}/${name}-${MIHOMO_VERSION}.${urlExt}`
-  const exeFile = `${name}${isWin ? '.exe' : ''}`
-  const zipFile = `${name}-${MIHOMO_VERSION}.${urlExt}`
-
-  return {
-    name: 'mihomo',
-    targetFile: `mihomo${isWin ? '.exe' : ''}`,
-    exeFile,
-    zipFile,
-    downloadURL
-  }
-}
-
-function mihomoSmart() {
-  const name = MIHOMO_SMART_MAP[`${platform}-${arch}`]
-  const isWin = platform === 'win32'
-  const urlExt = isWin ? 'zip' : 'gz'
-  const downloadURL = `${MIHOMO_SMART_URL_PREFIX}/${name}-${MIHOMO_SMART_VERSION}.${urlExt}`
-  const exeFile = `${name}${isWin ? '.exe' : ''}`
-  const zipFile = `${name}-${MIHOMO_SMART_VERSION}.${urlExt}`
-
-  return {
-    name: 'mihomo-smart',
-    targetFile: `mihomo-smart${isWin ? '.exe' : ''}`,
+    name: channel.targetName,
+    targetFile: `${channel.targetName}${isWin ? '.exe' : ''}`,
     exeFile,
     zipFile,
     downloadURL
@@ -589,17 +535,26 @@ const resolveFont = async () => {
 const tasks = [
   {
     name: 'mihomo-alpha',
-    func: () => getLatestAlphaVersion().then(() => resolveSidecar(MihomoAlpha())),
+    func: () =>
+      resolveCoreVersion(CORE_CHANNELS.alpha).then(() =>
+        resolveSidecar(coreSidecar(CORE_CHANNELS.alpha))
+      ),
     retry: 5
   },
   {
     name: 'mihomo',
-    func: () => getLatestReleaseVersion().then(() => resolveSidecar(mihomo())),
+    func: () =>
+      resolveCoreVersion(CORE_CHANNELS.mihomo).then(() =>
+        resolveSidecar(coreSidecar(CORE_CHANNELS.mihomo))
+      ),
     retry: 5
   },
   {
     name: 'mihomo-smart',
-    func: () => getLatestSmartVersion().then(() => resolveSidecar(mihomoSmart())),
+    func: () =>
+      resolveCoreVersion(CORE_CHANNELS.smart).then(() =>
+        resolveSidecar(coreSidecar(CORE_CHANNELS.smart))
+      ),
     retry: 5
   },
   { name: 'mmdb', func: resolveMmdb, retry: 5 },

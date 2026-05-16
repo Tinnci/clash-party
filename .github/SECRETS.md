@@ -1,6 +1,13 @@
 # GitHub Actions Configuration
 
-The workflows are ready to use Bun and locally maintained core release sources.
+The workflows use Bun, `tsgo` for default TypeScript checks, and locally maintained core release sources.
+
+## Maintained Branches
+
+- GUI branch: `smart_core_upstream`
+- Core branch: `Alpha`
+- Upstream GUI source: `mihomo-party-org/clash-party` branch `smart_core`
+- Upstream Smart core source: `vernesong/mihomo` branch `Alpha`
 
 ## Required Secrets
 
@@ -28,23 +35,20 @@ The workflows are ready to use Bun and locally maintained core release sources.
 - `ELECTRON_BUILDER_BINARIES_MIRROR`: electron-builder binary mirror. Default: `https://npmmirror.com/mirrors/electron-builder-binaries/`.
 - `UPSTREAM_REPO`: upstream repository for automatic sync. Default: `https://github.com/mihomo-party-org/clash-party.git`.
 - `UPSTREAM_BRANCH`: upstream branch for automatic sync. Default: `smart_core`.
-- `LOCAL_BRANCH`: local maintenance branch for automatic sync. Default: `smart_core`.
+- `LOCAL_BRANCH`: local maintenance branch for automatic sync. Default: `smart_core_upstream`.
 - `APPLE_INSTALLER_IDENTITY`: macOS installer signing identity.
-- `MIHOMO_VERSION_URL`: stable mihomo `version.txt` URL.
-- `MIHOMO_VERSION`: explicit stable mihomo artifact version. Used when `version.txt` is unavailable.
-- `MIHOMO_URL_PREFIX`: stable mihomo release download prefix.
-- `MIHOMO_RELEASE_URL_PREFIX`: exact stable mihomo release asset prefix. Use this for fixed tags such as `Prerelease-Alpha`.
-- `MIHOMO_ALPHA_VERSION_URL`: alpha mihomo `version.txt` URL.
-- `MIHOMO_ALPHA_VERSION`: explicit alpha mihomo artifact version. Used when `version.txt` is unavailable.
-- `MIHOMO_ALPHA_URL_PREFIX`: alpha mihomo release download prefix.
-- `MIHOMO_SMART_VERSION_URL`: Smart Core `version.txt` URL.
-- `MIHOMO_SMART_VERSION`: explicit Smart Core artifact version. Used when `version.txt` is unavailable.
-- `MIHOMO_SMART_URL_PREFIX`: Smart Core release download prefix.
-- `MIHOMO_SMART_NAME_FLAVOR`: Smart Core artifact naming flavor. Use `standard` for `Tinnci/mihomo`; use `go120` for legacy `vernesong/mihomo` assets.
+- `OWN_CORE_RELEASE_TAG`: self-maintained core release tag. Default: `Prerelease-Alpha`.
+- `OWN_CORE_RELEASE_PREFIX`: exact self-maintained core release asset prefix. Default: `https://github.com/Tinnci/mihomo/releases/download/Prerelease-Alpha`.
+- `OWN_CORE_VERSION_URL`: self-maintained core `version.txt` URL.
+- `OWN_CORE_VERSION`: explicit self-maintained core artifact version. Used when `version.txt` is unavailable.
+- `MIHOMO_VERSION_URL`, `MIHOMO_ALPHA_VERSION_URL`, `MIHOMO_SMART_VERSION_URL`: per-sidecar `version.txt` overrides. Use these only when intentionally using a core maintained outside `Tinnci/mihomo`.
+- `MIHOMO_VERSION`, `MIHOMO_ALPHA_VERSION`, `MIHOMO_SMART_VERSION`: per-sidecar explicit version overrides.
+- `MIHOMO_RELEASE_URL_PREFIX`, `MIHOMO_ALPHA_URL_PREFIX`, `MIHOMO_SMART_URL_PREFIX`: per-sidecar exact release asset prefixes for external core sources.
+- `MIHOMO_NAME_FLAVOR`, `MIHOMO_ALPHA_NAME_FLAVOR`, `MIHOMO_SMART_NAME_FLAVOR`: artifact naming flavor. Use `standard` for `Tinnci/mihomo`; use `go120` for legacy `vernesong/mihomo` assets.
 - `SYSPROXY_RS_VERSION`: sysproxy release version.
 - `SYSPROXY_RS_URL_PREFIX`: sysproxy release download prefix.
 - `TRAFFIC_MONITOR_URL_PREFIX`: TrafficMonitor download prefix.
 - `SUBSTORE_BUNDLE_URL`: Sub-Store backend bundle URL.
 - `SUBSTORE_FRONTEND_URL`: Sub-Store frontend zip URL.
 
-By default, the frontend embeds `mihomo`, `mihomo-alpha`, and `mihomo-smart` from `Tinnci/mihomo` `Prerelease-Alpha`. For a private fork, point the `MIHOMO_*` variables at that release and provide `CORE_DOWNLOAD_TOKEN`.
+By default, the frontend embeds `mihomo`, `mihomo-alpha`, and `mihomo-smart` from `Tinnci/mihomo` `Prerelease-Alpha` via the `OWN_CORE_*` variables. Only use `MIHOMO_*` variables for deliberate external/third-party core sources so the build provenance stays visible.

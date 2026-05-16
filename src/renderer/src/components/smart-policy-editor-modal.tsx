@@ -1,5 +1,6 @@
 import {
   Button,
+  Chip,
   Input,
   Modal,
   ModalBody,
@@ -36,6 +37,22 @@ const emptyPolicy = (): ISmartPolicy => ({
   strategy: 'sticky-sessions',
   collectData: false
 })
+
+function normalizeImportedPolicy(policy: Partial<ISmartPolicy>, index: number): ISmartPolicy {
+  return {
+    ...emptyPolicy(),
+    ...policy,
+    id: policy.id || `imported-${Date.now()}-${index}`,
+    name: policy.name || 'Imported Policy',
+    groupName: policy.groupName || policy.name || 'Imported Smart',
+    enabled: policy.enabled !== false,
+    category: policy.category || 'custom',
+    groupType: policy.groupType || 'smart',
+    matchRules: Array.isArray(policy.matchRules) ? policy.matchRules : [],
+    useAllProxies: policy.useAllProxies !== false,
+    strategy: policy.strategy || 'sticky-sessions'
+  }
+}
 
 function clonePolicy(policy: ISmartPolicy): ISmartPolicy {
   return structuredClone(policy)
@@ -127,7 +144,7 @@ const SmartPolicyEditorModal: React.FC<Props> = ({
     try {
       const parsed = JSON.parse(jsonText)
       if (!Array.isArray(parsed)) throw new Error('JSON must be an array')
-      const next = parsed as ISmartPolicy[]
+      const next = parsed.map(normalizeImportedPolicy)
       const error = validatePolicies(next)
       if (error) throw new Error(error)
       setDraftPolicies(next)
@@ -143,6 +160,9 @@ const SmartPolicyEditorModal: React.FC<Props> = ({
     await navigator.clipboard?.writeText(text)
   }
 
+  const enabledCount = draftPolicies.filter((policy) => policy.enabled).length
+  const editorDisabled = profileMode && ['inherit', 'off'].includes(draftOverrideMode)
+
   return (
     <Modal
       backdrop="blur"
@@ -154,11 +174,28 @@ const SmartPolicyEditorModal: React.FC<Props> = ({
       size="5xl"
     >
       <ModalContent>
-        <ModalHeader className="app-drag">{title}</ModalHeader>
+        <ModalHeader className="app-drag flex items-center justify-between gap-3 pr-12">
+          <span>{title}</span>
+          <div className="flex items-center gap-2">
+            <Chip size="sm" variant="flat" color="primary">
+              {enabledCount}/{draftPolicies.length} enabled
+            </Chip>
+            {profileMode && (
+              <Chip size="sm" variant="flat" color="secondary">
+                {draftOverrideMode}
+              </Chip>
+            )}
+          </div>
+        </ModalHeader>
         <ModalBody>
           {profileMode && (
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-sm text-default-600">Profile override mode</span>
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-default-200 px-3 py-2">
+              <div className="min-w-0">
+                <div className="text-sm font-medium">Profile override mode</div>
+                <div className="text-xs text-default-500">
+                  Inherit/off keeps this profile on the global Smart policy set.
+                </div>
+              </div>
               <Select
                 size="sm"
                 className="w-[220px]"
@@ -176,15 +213,16 @@ const SmartPolicyEditorModal: React.FC<Props> = ({
             </div>
           )}
 
-          <div className="grid grid-cols-[280px_1fr] gap-4">
-            <div className="flex min-h-[520px] flex-col gap-2 border-r border-default-200 pr-3">
-              <div className="flex gap-2">
-                <Button size="sm" color="primary" onPress={addPolicy}>
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-[280px_1fr]">
+            <div className="flex min-h-[520px] flex-col gap-2 border-default-200 lg:border-r lg:pr-3">
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" color="primary" isDisabled={editorDisabled} onPress={addPolicy}>
                   Add
                 </Button>
                 <Button
                   size="sm"
                   variant="flat"
+                  isDisabled={editorDisabled}
                   onPress={() => {
                     const presets = cloneDefaultSmartPolicies()
                     const custom = draftPolicies.filter(
@@ -197,16 +235,22 @@ const SmartPolicyEditorModal: React.FC<Props> = ({
                   Reset presets
                 </Button>
               </div>
-              <div className="flex flex-col gap-2 overflow-auto">
+              {editorDisabled && (
+                <div className="rounded-md border border-default-200 bg-default-50 px-3 py-2 text-xs text-default-500">
+                  Switch the override mode to Replace or Append to edit profile-specific policies.
+                </div>
+              )}
+              <div className="flex max-h-[520px] flex-col gap-2 overflow-auto">
                 {draftPolicies.map((policy) => (
                   <button
                     key={policy.id}
-                    draggable
+                    draggable={!editorDisabled}
+                    disabled={editorDisabled}
                     className={`cursor-move rounded-md border px-3 py-2 text-left text-sm ${
                       selectedPolicy?.id === policy.id
                         ? 'border-primary bg-primary-50 text-primary'
                         : 'border-default-200 hover:bg-default-100'
-                    }`}
+                    } ${editorDisabled ? 'cursor-default opacity-60' : ''}`}
                     onDragStart={() => setDraggingId(policy.id)}
                     onDragOver={(event) => event.preventDefault()}
                     onDrop={() => movePolicy(draggingId, policy.id)}
@@ -216,6 +260,7 @@ const SmartPolicyEditorModal: React.FC<Props> = ({
                       <span className="truncate font-medium">{policy.name}</span>
                       <Switch
                         size="sm"
+                        isDisabled={editorDisabled}
                         isSelected={policy.enabled}
                         onValueChange={(enabled) =>
                           setDraftPolicies((items) =>
@@ -226,29 +271,42 @@ const SmartPolicyEditorModal: React.FC<Props> = ({
                         }
                       />
                     </div>
-                    <div className="mt-1 truncate text-xs text-default-500">{policy.groupName}</div>
+                    <div className="mt-1 flex items-center gap-2 text-xs text-default-500">
+                      <span className="truncate">{policy.groupName}</span>
+                      <span className="shrink-0 rounded bg-default-100 px-1.5 py-0.5">
+                        {policy.groupType}
+                      </span>
+                    </div>
                   </button>
                 ))}
+                {draftPolicies.length === 0 && (
+                  <div className="rounded-md border border-dashed border-default-300 px-3 py-8 text-center text-sm text-default-500">
+                    No profile policies. Add one when using Replace or Append mode.
+                  </div>
+                )}
               </div>
             </div>
 
             {selectedPolicy && (
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                 <Input
                   size="sm"
                   label="Policy name"
+                  isDisabled={editorDisabled}
                   value={selectedPolicy.name}
                   onValueChange={(name) => setSelectedPolicy({ name })}
                 />
                 <Input
                   size="sm"
                   label="Group name"
+                  isDisabled={editorDisabled}
                   value={selectedPolicy.groupName}
                   onValueChange={(groupName) => setSelectedPolicy({ groupName })}
                 />
                 <Select
                   size="sm"
                   label="Category"
+                  isDisabled={editorDisabled}
                   selectedKeys={new Set([selectedPolicy.category])}
                   disallowEmptySelection
                   onSelectionChange={(keys) =>
@@ -263,6 +321,7 @@ const SmartPolicyEditorModal: React.FC<Props> = ({
                 <Select
                   size="sm"
                   label="Group type"
+                  isDisabled={editorDisabled}
                   selectedKeys={new Set([selectedPolicy.groupType])}
                   disallowEmptySelection
                   onSelectionChange={(keys) =>
@@ -277,6 +336,8 @@ const SmartPolicyEditorModal: React.FC<Props> = ({
                   className="col-span-2"
                   minRows={5}
                   label="Match rules"
+                  isDisabled={editorDisabled}
+                  placeholder={'DOMAIN-SUFFIX,openai.com\nGEOSITE,banking\nRULE-SET,ai'}
                   value={selectedPolicy.matchRules.join('\n')}
                   onValueChange={(value) =>
                     setSelectedPolicy({
@@ -290,18 +351,23 @@ const SmartPolicyEditorModal: React.FC<Props> = ({
                 <Input
                   size="sm"
                   label="Include filter"
+                  isDisabled={editorDisabled}
+                  placeholder="日本|新加坡|美国|JP|SG|US"
                   value={selectedPolicy.includeFilter || ''}
                   onValueChange={(includeFilter) => setSelectedPolicy({ includeFilter })}
                 />
                 <Input
                   size="sm"
                   label="Exclude filter"
+                  isDisabled={editorDisabled}
+                  placeholder="香港|HK"
                   value={selectedPolicy.excludeFilter || ''}
                   onValueChange={(excludeFilter) => setSelectedPolicy({ excludeFilter })}
                 />
                 <Select
                   size="sm"
                   label="Strategy"
+                  isDisabled={editorDisabled || selectedPolicy.groupType !== 'smart'}
                   selectedKeys={new Set([selectedPolicy.strategy])}
                   disallowEmptySelection
                   onSelectionChange={(keys) =>
@@ -311,16 +377,39 @@ const SmartPolicyEditorModal: React.FC<Props> = ({
                   <SelectItem key="sticky-sessions">Sticky sessions</SelectItem>
                   <SelectItem key="round-robin">Round robin</SelectItem>
                 </Select>
-                <Input
-                  size="sm"
-                  label="Policy priority"
-                  value={selectedPolicy.policyPriority || ''}
-                  onValueChange={(policyPriority) => setSelectedPolicy({ policyPriority })}
+                {selectedPolicy.groupType === 'smart' ? (
+                  <Input
+                    size="sm"
+                    label="Policy priority"
+                    isDisabled={editorDisabled}
+                    placeholder="节点名或正则:1.2;HK:0.5"
+                    value={selectedPolicy.policyPriority || ''}
+                    onValueChange={(policyPriority) => setSelectedPolicy({ policyPriority })}
+                  />
+                ) : (
+                  <div />
+                )}
+                <Textarea
+                  className="md:col-span-2"
+                  minRows={2}
+                  label="Use providers"
+                  isDisabled={editorDisabled || selectedPolicy.useAllProxies}
+                  placeholder={'provider-a\nprovider-b'}
+                  value={(selectedPolicy.useProviders || []).join('\n')}
+                  onValueChange={(value) =>
+                    setSelectedPolicy({
+                      useProviders: value
+                        .split('\n')
+                        .map((line) => line.trim())
+                        .filter(Boolean)
+                    })
+                  }
                 />
                 <div className="flex items-center justify-between rounded-md border border-default-200 px-3">
                   <span className="text-sm">Use all proxies</span>
                   <Switch
                     size="sm"
+                    isDisabled={editorDisabled}
                     isSelected={selectedPolicy.useAllProxies}
                     onValueChange={(useAllProxies) => setSelectedPolicy({ useAllProxies })}
                   />
@@ -329,6 +418,7 @@ const SmartPolicyEditorModal: React.FC<Props> = ({
                   <span className="text-sm">LightGBM</span>
                   <Switch
                     size="sm"
+                    isDisabled={editorDisabled || selectedPolicy.groupType !== 'smart'}
                     isSelected={selectedPolicy.useLightGBM ?? false}
                     onValueChange={(useLightGBM) => setSelectedPolicy({ useLightGBM })}
                   />
@@ -337,6 +427,7 @@ const SmartPolicyEditorModal: React.FC<Props> = ({
                   <span className="text-sm">Collect data</span>
                   <Switch
                     size="sm"
+                    isDisabled={editorDisabled || selectedPolicy.groupType !== 'smart'}
                     isSelected={selectedPolicy.collectData ?? false}
                     onValueChange={(collectData) => setSelectedPolicy({ collectData })}
                   />
@@ -346,6 +437,7 @@ const SmartPolicyEditorModal: React.FC<Props> = ({
                     <Input
                       size="sm"
                       label="Test URL"
+                      isDisabled={editorDisabled}
                       value={selectedPolicy.testUrl || ''}
                       onValueChange={(testUrl) => setSelectedPolicy({ testUrl })}
                     />
@@ -353,6 +445,7 @@ const SmartPolicyEditorModal: React.FC<Props> = ({
                       size="sm"
                       type="number"
                       label="Interval"
+                      isDisabled={editorDisabled}
                       value={(selectedPolicy.interval || 300).toString()}
                       onValueChange={(value) =>
                         setSelectedPolicy({ interval: parseInt(value, 10) || 300 })
@@ -361,10 +454,21 @@ const SmartPolicyEditorModal: React.FC<Props> = ({
                   </>
                 )}
                 <div className="col-span-2 flex gap-2">
-                  <Button size="sm" variant="flat" onPress={duplicatePolicy}>
+                  <Button
+                    size="sm"
+                    variant="flat"
+                    isDisabled={editorDisabled}
+                    onPress={duplicatePolicy}
+                  >
                     Duplicate
                   </Button>
-                  <Button size="sm" color="danger" variant="flat" onPress={deletePolicy}>
+                  <Button
+                    size="sm"
+                    color="danger"
+                    variant="flat"
+                    isDisabled={editorDisabled}
+                    onPress={deletePolicy}
+                  >
                     Delete
                   </Button>
                 </div>
@@ -376,6 +480,7 @@ const SmartPolicyEditorModal: React.FC<Props> = ({
             <Textarea
               minRows={3}
               label="JSON import/export"
+              isDisabled={editorDisabled}
               value={jsonText}
               onValueChange={setJsonText}
             />
@@ -383,7 +488,7 @@ const SmartPolicyEditorModal: React.FC<Props> = ({
               <Button size="sm" variant="flat" onPress={exportJson}>
                 Export
               </Button>
-              <Button size="sm" variant="flat" onPress={importJson}>
+              <Button size="sm" variant="flat" isDisabled={editorDisabled} onPress={importJson}>
                 Import
               </Button>
             </div>

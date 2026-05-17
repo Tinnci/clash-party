@@ -184,17 +184,12 @@ export async function downloadAndInstallUpdate(version: string): Promise<void> {
     }
     if (file.endsWith('.7z')) {
       await copyFile(path.join(resourcesFilesDir(), '7za.exe'), path.join(dataDir(), '7za.exe'))
-      spawn(
-        'cmd',
-        [
-          '/C',
-          `"timeout /t 2 /nobreak >nul && "${path.join(dataDir(), '7za.exe')}" x -o"${exeDir()}" -y "${path.join(dataDir(), file)}" & start "" "${exePath()}""`
-        ],
-        {
-          shell: true,
-          detached: true
-        }
-      ).unref()
+      const command = `timeout /t 2 /nobreak >nul && "${path.join(dataDir(), '7za.exe')}" x -o"${exeDir()}" -y "${path.join(dataDir(), file)}" && start "" "${exePath()}"`
+      spawn('cmd.exe', ['/d', '/s', '/c', command], {
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: true
+      }).unref()
       app.quit()
     }
     if (file.endsWith('.pkg')) {

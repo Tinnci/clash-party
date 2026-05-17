@@ -98,17 +98,12 @@ export function setNativeTheme(theme: 'system' | 'light' | 'dark'): void {
 
 export function resetAppConfig(): void {
   if (process.platform === 'win32') {
-    spawn(
-      'cmd',
-      [
-        '/C',
-        `"timeout /t 2 /nobreak >nul && rmdir /s /q "${dataDir()}" && start "" "${exePath()}""`
-      ],
-      {
-        shell: true,
-        detached: true
-      }
-    ).unref()
+    const command = `timeout /t 2 /nobreak >nul && rmdir /s /q "${dataDir()}" && start "" "${exePath()}"`
+    spawn('cmd.exe', ['/d', '/s', '/c', command], {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true
+    }).unref()
   } else {
     const script = `while kill -0 ${process.pid} 2>/dev/null; do
   sleep 0.1
@@ -117,11 +112,10 @@ done
   ${process.argv.join(' ')} & disown
 exit
 `
-    spawn('sh', ['-c', `"${script}"`], {
-      shell: true,
+    spawn('sh', ['-c', script], {
       detached: true,
       stdio: 'ignore'
-    })
+    }).unref()
   }
   app.quit()
 }

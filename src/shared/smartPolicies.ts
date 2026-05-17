@@ -38,7 +38,7 @@ export const defaultSmartPolicies: ISmartPolicy[] = [
     category: 'finance',
     groupName: 'Finance - Stable',
     groupType: 'smart',
-    matchRules: ['GEOSITE,banking'],
+    matchRules: ['GEOSITE,category-finance'],
     includeFilter: '台湾|新加坡|日本|TW|SG|JP',
     excludeFilter: '香港|HK',
     useAllProxies: true,
@@ -47,6 +47,22 @@ export const defaultSmartPolicies: ISmartPolicy[] = [
   }
 ]
 
+export function normalizeSmartPolicyPresets(policies: ISmartPolicy[]): ISmartPolicy[] {
+  return policies.map((policy) => {
+    const isFinancePreset =
+      policy.id === 'preset-finance' ||
+      (policy.category === 'finance' && policy.groupName === 'Finance - Stable')
+    if (!isFinancePreset || !Array.isArray(policy.matchRules)) return policy
+
+    return {
+      ...policy,
+      matchRules: policy.matchRules.map((rule) =>
+        rule.trim().toUpperCase() === 'GEOSITE,BANKING' ? 'GEOSITE,category-finance' : rule
+      )
+    }
+  })
+}
+
 export function cloneDefaultSmartPolicies(): ISmartPolicy[] {
-  return structuredClone(defaultSmartPolicies)
+  return normalizeSmartPolicyPresets(structuredClone(defaultSmartPolicies))
 }

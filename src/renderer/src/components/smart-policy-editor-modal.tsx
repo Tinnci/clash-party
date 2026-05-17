@@ -13,7 +13,10 @@ import {
   Textarea
 } from '@heroui/react'
 import React, { useMemo, useState } from 'react'
-import { cloneDefaultSmartPolicies } from '../../../shared/smartPolicies'
+import {
+  cloneDefaultSmartPolicies,
+  normalizeSmartPolicyPresets
+} from '../../../shared/smartPolicies'
 import { toast } from './base/toast'
 
 interface Props {
@@ -39,19 +42,22 @@ const emptyPolicy = (): ISmartPolicy => ({
 })
 
 function normalizeImportedPolicy(policy: Partial<ISmartPolicy>, index: number): ISmartPolicy {
-  return {
-    ...emptyPolicy(),
-    ...policy,
-    id: policy.id || `imported-${Date.now()}-${index}`,
-    name: policy.name || 'Imported Policy',
-    groupName: policy.groupName || policy.name || 'Imported Smart',
-    enabled: policy.enabled !== false,
-    category: policy.category || 'custom',
-    groupType: policy.groupType || 'smart',
-    matchRules: Array.isArray(policy.matchRules) ? policy.matchRules : [],
-    useAllProxies: policy.useAllProxies !== false,
-    strategy: policy.strategy || 'sticky-sessions'
-  }
+  const [normalizedPolicy] = normalizeSmartPolicyPresets([
+    {
+      ...emptyPolicy(),
+      ...policy,
+      id: policy.id || `imported-${Date.now()}-${index}`,
+      name: policy.name || 'Imported Policy',
+      groupName: policy.groupName || policy.name || 'Imported Smart',
+      enabled: policy.enabled !== false,
+      category: policy.category || 'custom',
+      groupType: policy.groupType || 'smart',
+      matchRules: Array.isArray(policy.matchRules) ? policy.matchRules : [],
+      useAllProxies: policy.useAllProxies !== false,
+      strategy: policy.strategy || 'sticky-sessions'
+    }
+  ])
+  return normalizedPolicy
 }
 
 function clonePolicy(policy: ISmartPolicy): ISmartPolicy {
@@ -337,7 +343,7 @@ const SmartPolicyEditorModal: React.FC<Props> = ({
                   minRows={5}
                   label="Match rules"
                   isDisabled={editorDisabled}
-                  placeholder={'DOMAIN-SUFFIX,openai.com\nGEOSITE,banking\nRULE-SET,ai'}
+                  placeholder={'DOMAIN-SUFFIX,openai.com\nGEOSITE,category-finance\nRULE-SET,ai'}
                   value={selectedPolicy.matchRules.join('\n')}
                   onValueChange={(value) =>
                     setSelectedPolicy({

@@ -1,4 +1,5 @@
 import { overrideLogger } from '../utils/logger'
+import { normalizeSmartPolicyPresets } from '../../shared/smartPolicies'
 import { getAppConfig } from './app'
 import { addOverrideItem, removeOverrideItem, getOverrideItem } from './override'
 
@@ -23,17 +24,20 @@ function getMode(config: IAppConfig): SmartOverrideMode {
 }
 
 function normalizePolicy(policy: ISmartPolicy, defaults: SmartOverrideBuildConfig): ISmartPolicy {
+  const [normalizedPolicy] = normalizeSmartPolicyPresets([policy])
   return {
-    ...policy,
-    enabled: policy.enabled !== false,
-    category: policy.category || 'custom',
-    groupType: policy.groupType || 'smart',
-    matchRules: Array.isArray(policy.matchRules) ? policy.matchRules.filter(Boolean) : [],
-    useAllProxies: policy.useAllProxies !== false,
-    strategy: policy.strategy || defaults.strategy,
-    useLightGBM: policy.useLightGBM ?? defaults.useLightGBM,
-    collectData: policy.collectData ?? defaults.collectData,
-    interval: policy.interval || 300
+    ...normalizedPolicy,
+    enabled: normalizedPolicy.enabled !== false,
+    category: normalizedPolicy.category || 'custom',
+    groupType: normalizedPolicy.groupType || 'smart',
+    matchRules: Array.isArray(normalizedPolicy.matchRules)
+      ? normalizedPolicy.matchRules.filter(Boolean)
+      : [],
+    useAllProxies: normalizedPolicy.useAllProxies !== false,
+    strategy: normalizedPolicy.strategy || defaults.strategy,
+    useLightGBM: normalizedPolicy.useLightGBM ?? defaults.useLightGBM,
+    collectData: normalizedPolicy.collectData ?? defaults.collectData,
+    interval: normalizedPolicy.interval || 300
   }
 }
 

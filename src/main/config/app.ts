@@ -4,7 +4,7 @@ import { parse, stringify } from '../utils/yaml'
 import { deepMerge } from '../utils/merge'
 import { defaultConfig } from '../utils/template'
 import { normalizeMaxLogFileSizeMB, setGlobalMaxLogFileSizeMB } from '../utils/logFile'
-import { cloneDefaultSmartPolicies } from '../../shared/smartPolicies'
+import { cloneDefaultSmartPolicies, normalizeSmartPolicyPresets } from '../../shared/smartPolicies'
 
 let appConfig: IAppConfig // config.yaml
 let appConfigWriteQueue: Promise<void> = Promise.resolve()
@@ -24,6 +24,8 @@ function migrateAppConfig(data: unknown): Partial<IAppConfig> {
   }
   if (!Array.isArray(config.smartPolicies)) {
     config.smartPolicies = cloneDefaultSmartPolicies()
+  } else {
+    config.smartPolicies = normalizeSmartPolicyPresets(config.smartPolicies)
   }
   return config
 }
